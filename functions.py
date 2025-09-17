@@ -130,3 +130,5 @@ def shift_usd_fx_next_day(fx_series: pd.Series) -> pd.Series:
     if not isinstance(fx_series, pd.Series):
         raise TypeError("fx_series must be a pandas Series")
     return fx_series.shift(-1)
+
+
