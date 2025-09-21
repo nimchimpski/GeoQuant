@@ -44,14 +44,14 @@ def deal_with_cash(ccy, fx_map, lookback_days):
         return cash_series
 
 def fetch_asset_series(url: str, holding: dict, fx_map: dict, params: dict, max_age: int, lookback_days: int) -> pd.Series:
-    ticker   = holding["ticker"]
-    name  = holding["name"]
+
     ccy   = holding["ccy"].upper()
     # gbx   = h["gbx"]
     # HANDLE CASH AS SPECIAL CASE
     if holding.get("type", "").lower() == "cash":
         return deal_with_cash(ccy, fx_map, lookback_days)
     else:
+        ticker   = holding.get("ticker")
         px_df = fetch_csv_robust(f'{url}{ticker}', params=params, ticker=ticker, max_age=max_age)
         # Normalize, de-dup, and pick close-like series
         asset_close_local_s = sort_cols(px_df)
