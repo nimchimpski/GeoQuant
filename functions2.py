@@ -30,14 +30,14 @@ def make_fx_map(url, holdings, params, max_age, no_fx, usd_shift) -> dict[str, p
 def deal_with_cash(ccy, fx_map, lookback_days):
     if ccy == 'CHF':
         if fx_map:
-            print('fx_map')
+            # print('fx_map')
             idx = max((s.index for s in fx_map.values()), key=len)
-            print(f'idx length {len(idx)}')
+            # print(f'idx length {len(idx)}')
         else:
             idx = pd.date_range(end=pd.to_datetime(datetime.now().strftime('%Y-%m-%d')), periods=lookback_days, freq="B")
         # return a constant series all 1's
         cash_series= pd.Series(1.0, index=idx, name = "CASH_CHF")
-        print(f'length cash_series {len(cash_series)}   ')
+        # print(f'length cash_series {len(cash_series)}   ')
         return cash_series
     else:
         cash_series = fx_map.get(f'{ccy}CHF').copy().rename(f'CASH_{ccy}')

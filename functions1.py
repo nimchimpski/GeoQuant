@@ -49,7 +49,7 @@ def fetch_csv_robust(url: str, params: dict, ticker: str, max_age: int = 24) -> 
 
     # if cache is fresh return it
     if is_fresh(path, max_age):
-        print(f"{ticker} - using cached data")
+        # print(f"{ticker} - using cached data")
         df = pd.read_csv(path, header=0, parse_dates=[0], index_col=0).sort_index()
         check_start_date(df)
         return df
