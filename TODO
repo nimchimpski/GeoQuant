@@ -1,12 +1,17 @@
-- FX HEDGES AS SEPERATE LINE IN MATRIX WITH VOL
 - sharpe???
 - simulate potential crisis
 - toy matrix examples
-- profit taking/locking in theories...what works
+- slope-t
+- fx short gate 
+
+
+-run differenet lookbacks
 
 
 
 DONE
 - back test the fx short gate == GATE NOT NECESSARY FOR PURE HEDGE
 - forward points - gives me a better carry rate for fx shorts? == NO, just cleaner
+- FX HEDGES AS SEPERATE LINE IN MATRIX WITH VOL
+
 

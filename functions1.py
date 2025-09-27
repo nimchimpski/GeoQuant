@@ -111,12 +111,13 @@ def pick_close_column(df: pd.DataFrame) -> pd.Series:
 
 def sort_cols(df):
     """Normalize time index and return a float close-like Series.
-    No asset- or currency-specific adjustments here.
     """
     if not df.index.is_monotonic_increasing: 
         print('index wasnt sorted')
         df = df.sort_index()
     df = df[~df.index.duplicated(keep='last')]
+    df = df[df.index.dayofweek < 5] # ?????
+    df.index = pd.to_datetime(df.index)
     # s = pick_close_column(df).astype('float64')
     return df['Adjusted_close'].astype('float64')
 
