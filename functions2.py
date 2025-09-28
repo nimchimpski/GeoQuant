@@ -132,3 +132,16 @@ def get_holding_value_chf(h: dict, fx_map: dict, assets_close_local_df: pd.DataF
             else:
                 # ALREADY CHF-CONVERTED SERIES (AND ALIGNED) – USE THE AS-OF PRICE
                 return float(assets_close_chf_df[name].reindex([asof]).iloc[-1]) * position
+            
+def _log_returns(s: pd.Series) -> pd.Series:
+    return np.log(s).diff()
+
+def standardize_fx_daily_index(s: pd.Series) -> pd.Series:
+    """Ensure Mon–Fri daily bars. Your index is date-only; drop Sundays/Saturdays."""
+    s = s.sort_index().astype(float).copy()
+    s.index = pd.to_datetime(s.index)
+    # Monday=0 ... Sunday=6; keep 0..4
+    s = s[s.index.dayofweek < 5]
+    # if provider emitted duplicates, keep last
+    s = s[~s.index.duplicated(keep='last')]
+    return s

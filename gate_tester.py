@@ -7,6 +7,8 @@ import re
 import matplotlib.pyplot as plt
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
+from fxshort_gates import fxshort_gate, standardize_fx_daily_index, wave_rider
+from typing import Tuple, Dict
 
 
 
@@ -140,95 +142,104 @@ def _coerce_float(d: dict) -> dict:
             out[k] = v
     return out
 
-# def sweep_fxshort_gate(
-#     price: pd.Series,
-#     gate_fn: Callable = fxshort_gate,
-#     carry_ann_vals: Iterable[float] = (0.0, 0.02, 0.04),
-#     slope_window_vals: Iterable[int] = (5, 6, 8, 10, 15, 20),
-#     consec_vals: Iterable[int] = (1, 2, 3),
-#     slope_entry_thr_vals: Iterable[float] = (0.0, -1e-4, -5e-4),
-#     slope_exit_thr_offsets: Iterable[float] = (0.0, 1e-4, 3e-4),
-#     require_carry_vals: Iterable[bool] = (False, True),
-#     consec_rises_kill_vals: Iterable[int] = (0, 1, 2),
-#     buffer20_vals: Iterable[float] = (0.000, 0.001, 0.002),
-#     max_combos: int | None = None,
-#     rank_key: str = "expectancy_per_trade",
-#     min_trades: int = 30,
-# ) -> pd.DataFrame:
-#     """
-#     Parameter sweep for fxshort gates.
-#     slope_exit_threshold = slope_entry_threshold + offset (hysteresis).
-#     """
-#     s = standardize_fx_daily_index(price)
-#     combos = itertools.product(
-#         carry_ann_vals,
-#         slope_window_vals,
-#         consec_vals,
-#         slope_entry_thr_vals,
-#         slope_exit_thr_offsets,
-#         require_carry_vals,
-#         consec_rises_kill_vals,
-#         buffer20_vals,
-#     )
-#     records = []
-#     for idx, (carry_ann, slope_w, consec, ent_thr, exit_off, req_carry, rises_kill, buf20) in enumerate(combos):
-#         if max_combos and idx >= max_combos:
-#             break
-#         exit_thr = ent_thr + exit_off
-#         if exit_thr < ent_thr:  # safety (should not happen with offsets >=0)
-#             continue
-#         try:
-#             gate = gate_fn(
-#                 s,
-#                 carry_ann=carry_ann,
-#                 slope_window=slope_w,
-#                 consec=consec,
-#                 buffer20=buf20,
-#                 slope_entry_threshold=ent_thr,
-#                 slope_exit_threshold=exit_thr,
-#                 require_carry=req_carry,
-#                 shift_for_signal=True,
-#                 consec_rises_kill=rises_kill,
-#             )
-#             trades, stats = analyze_gate_trades(s, gate, position="short")
-#         except Exception as e:
-#             continue
-#         if stats.get("trades", 0) < min_trades:
-#             continue
-#         rec = {
-#             "carry_ann": carry_ann,
-#             "slope_window": slope_w,
-#             "consec": consec,
-#             "slope_entry_thr": ent_thr,
-#             "slope_exit_thr": exit_thr,
-#             "require_carry": req_carry,
-#             "consec_rises_kill": rises_kill,
-#             "buffer20": buf20,
-#         }
-#         rec.update(_coerce_float(stats))
-#         records.append(rec)
-#     if not records:
-#         return pd.DataFrame()
-#     df = pd.DataFrame(records)
-#     # Ranking: primary rank_key desc, then total_pct_return, then win_rate
-#     rk = rank_key
-#     if rk not in df.columns:
-#         raise ValueError(f"rank_key {rk} not in results")
-#     df = df.sort_values(
-#         [rk, "total_pct_return", "win_rate"],
-#         ascending=[False, False, False],
-#         kind="mergesort"
-#     ).reset_index(drop=True)
-#     return df
+def sweep_fxshort_gate(
+    price: pd.Series,
+    gate_fn: Callable = fxshort_gate,
+    carry_ann_vals: Iterable[float] = (0.04,),
+    slope_window_vals: Iterable[int] = (5, 6, 8, 10, 15, 20),
+    consec_vals: Iterable[int] = (1, 2, 3),
+    slope_entry_thr_vals: Iterable[float] = (0.0, -1e-4, -5e-4),
+    slope_exit_thr_offsets: Iterable[float] = (0.0, 1e-4, 3e-4),
+    require_carry_vals: Iterable[bool] = (False, True),
+    consec_rises_kill_vals: Iterable[int] = (0, 1, 2),
+    buffer20_vals: Iterable[float] = (0.002,),
+    max_combos: int | None = None,
+    rank_key: str = "net_expectancy_per_trade",
+    min_trades: int = 30,
+) -> pd.DataFrame:
+    """
+    Parameter sweep for fxshort gates.
+    slope_exit_threshold = slope_entry_threshold + offset (hysteresis).
+    """
+    s = standardize_fx_daily_index(price)
+    combos = itertools.product(
+        carry_ann_vals,
+        slope_window_vals,
+        consec_vals,
+        slope_entry_thr_vals,
+        slope_exit_thr_offsets,
+        require_carry_vals,
+        consec_rises_kill_vals,
+        buffer20_vals,
+    )
+    records = []
+    for idx, (carry_ann, slope_w, consec, ent_thr, exit_off, req_carry, rises_kill, buf20) in enumerate(combos):
+        if max_combos and idx >= max_combos:
+            break
+        exit_thr = ent_thr + exit_off
+        if exit_thr < ent_thr:  # safety (should not happen with offsets >=0)
+            continue
+        try:
+            gate = gate_fn(
+                s,
+                carry_ann=carry_ann,
+                slope_window=slope_w,
+                consec=consec,
+                buffer20=buf20,
+                slope_entry_threshold=ent_thr,
+                slope_exit_threshold=exit_thr,
+                require_carry=req_carry,
+                shift_for_signal=True,
+                consec_rises_kill=rises_kill,
+            )
+            trades, stats = analyze_gate_trades(s, gate, position="short")
 
-# def summarize_top(df: pd.DataFrame, top: int = 10) -> pd.DataFrame:
-#     cols = [
-#         "carry_ann","slope_window","consec",
-#         "slope_entry_thr","slope_exit_thr",
-#         "require_carry","consec_rises_kill","buffer20",
-#         "trades","win_rate","expectancy_per_trade","total_pct_return",
-#         "avg_pct_return","avg_win","avg_loss","median_holding_days",
-#         "max_draw_trade_pct","best_trade_pct"
-#     ]
-#     cols = [c for c in cols if c in df.columns]
-#     return df.head(top)[cols]
+            FEE_PER_TRADE = 0.00004  # or parameterize if needed
+            trades["carry_cost"] = trades["holding_days"] * (carry_ann / 365)
+            trades["fee_cost"] = FEE_PER_TRADE
+            trades["net_pct_return"] = trades["pct_return"] - trades["carry_cost"] - trades["fee_cost"]
+            # Recompute stats on net_pct_return
+            net_expectancy = trades["net_pct_return"].mean()
+            stats["net_expectancy_per_trade"] = net_expectancy
+
+        except Exception as e:
+            continue
+        if stats.get("trades", 0) < min_trades:
+            continue
+        rec = {
+            "carry_ann": carry_ann,
+            "slope_window": slope_w,
+            "consec": consec,
+            "slope_entry_thr": ent_thr,
+            "slope_exit_thr": exit_thr,
+            "require_carry": req_carry,
+            "consec_rises_kill": rises_kill,
+            "buffer20": buf20,
+        }
+        rec.update(_coerce_float(stats))
+        records.append(rec)
+    if not records:
+        return pd.DataFrame()
+    df = pd.DataFrame(records)
+    # Ranking: primary rank_key desc, then total_pct_return, then win_rate
+    rk = rank_key
+    if rk not in df.columns:
+        raise ValueError(f"rank_key {rk} not in results")
+    df = df.sort_values(
+        [rk, "total_pct_return", "win_rate"],
+        ascending=[False, False, False],
+        kind="mergesort"
+    ).reset_index(drop=True)
+    return df
+
+def summarize_top(df: pd.DataFrame, top: int = 10) -> pd.DataFrame:
+    cols = [
+        "carry_ann","slope_window","consec",
+        "slope_entry_thr","slope_exit_thr",
+        "require_carry","consec_rises_kill","buffer20",
+        "trades","win_rate","net_expectancy_per_trade","total_pct_return",
+        "avg_pct_return","avg_win","avg_loss","median_holding_days",
+        "max_draw_trade_pct","best_trade_pct"
+    ]
+    cols = [c for c in cols if c in df.columns]
+    return df.head(top)[cols]

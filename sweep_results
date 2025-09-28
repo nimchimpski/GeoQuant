@@ -1,0 +1,6 @@
+USD
+carry_ann  slope_window  consec  slope_entry_thr  slope_exit_thr  require_carry  consec_rises_kill  buffer20  trades  win_rate  expectancy_per_trade  total_pct_return  avg_pct_return  avg_win  avg_loss  median_holding_days  max_draw_trade_pct  best_trade_pct
+
+      0.00             6       2          -0.0003         -0.0003          False                  0     0.002     112  0.562500              0.002058          0.230538        0.002058 0.008023 -0.005611                  5.0           -0.027072        0.082444
+
+GBP
