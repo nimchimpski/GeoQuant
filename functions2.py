@@ -145,3 +145,24 @@ def standardize_fx_daily_index(s: pd.Series) -> pd.Series:
     # if provider emitted duplicates, keep last
     s = s[~s.index.duplicated(keep='last')]
     return s
+
+def norm_risk_fx(val) -> bool:
+    """
+    Normalize various user inputs to a boolean with this convention:
+    - False => strip FX volatility (hedged in risk)
+    - True  => include FX volatility (unhedged in risk)
+    Defaults to True when missing/unknown.
+    """
+    if isinstance(val, bool):
+        return val
+    if val is None:
+        return True
+    if isinstance(val, str):
+        v = val.strip().lower()
+        if v in ("none", "hedged", "no", "false", "0", "off"):
+            return False
+        if v in ("true", "yes", "1", "on", "unhedged"):
+            return True
+    if isinstance(val, (int, float)):
+        return bool(val)
+    return True
