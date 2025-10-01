@@ -25,7 +25,7 @@ def is_fresh(path: pathlib.Path, max_age: int) -> bool:
 def looks_like_json(payload: bytes) -> bool:
     return payload.lstrip()[:1] in (b"{", b"[")
 
-def fetch_csv_robust(ticker: str, url: str = 'https://eodhd.com/api/eod/', params: dict=None,  max_age: int = 24) -> pd.DataFrame:
+def fetch_csv_robust(ticker: str, params: dict=None,  max_age: int = 24) -> pd.DataFrame:
     """
         Robust CSV fetch with:
       - on-disk cache (TTL),
@@ -39,6 +39,8 @@ def fetch_csv_robust(ticker: str, url: str = 'https://eodhd.com/api/eod/', param
             'to': time.strftime("%Y-%m-%d"),
             'api_token': EOD_API
         }
+    url = f'https://eodhd.com/api/eod/{ticker}'
+    
     def check_start_date(df):
         earliest = df.index.min().date()
         # print('data start date:', earliest)

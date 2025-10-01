@@ -7,8 +7,9 @@ import re
 import matplotlib.pyplot as plt
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
-from fxshort_gates import fxshort_gate, standardize_fx_daily_index, wave_rider
+from fxshort_gates import fxshort_gate, wave_rider
 from typing import Tuple, Dict
+from functions2 import standardize_fx_daily_index
 
 
 

@@ -166,3 +166,31 @@ def norm_risk_fx(val) -> bool:
     if isinstance(val, (int, float)):
         return bool(val)
     return True
+
+
+
+def _k_confirm(signal: pd.Series, k: int) -> pd.Series:
+    if k <= 1:
+        return signal.astype(bool)
+    return (
+        signal.astype("int8")
+        .rolling(k, min_periods=k)
+        .sum()
+        .ge(k)
+        .astype(bool)
+    )
+
+def _compose_entry_signal(slope: pd.Series,
+                          slope_entry_threshold: float,
+                          carry_ok: pd.Series,
+                          require_carry: bool) -> pd.Series:
+    slope_down = (slope <= slope_entry_threshold)
+    return slope_down & (carry_ok if require_carry else True)
+
+def _compose_reconfirm(slope: pd.Series,
+                       slope_exit_threshold: float,
+                       carry_ok: pd.Series,
+                       require_carry: bool) -> pd.Series:
+    # Require down (or strictly below exit threshold) slope to maintain position.
+    slope_still_down = slope < slope_exit_threshold
+    return slope_still_down & (carry_ok if require_carry else True)

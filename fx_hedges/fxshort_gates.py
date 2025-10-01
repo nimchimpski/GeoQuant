@@ -2,6 +2,7 @@ import numpy as np
 from scipy import stats
 from typing import Tuple, Dict
 import pandas as pd
+from functions2 import standardize_fx_daily_index
 
 
 
