@@ -1,11 +1,9 @@
 - sharpe???
 - simulate potential crisis
-- toy matrix examples
 - slope-t
-- fx short gate 
-
-
--run differenet lookbacks
+- add fees to sweep E ret + feels alone
+- run differenet lookbacks
+- reorder fxshort run so sweep returns the plot
 
 
 
@@ -13,5 +11,6 @@ DONE
 - back test the fx short gate == GATE NOT NECESSARY FOR PURE HEDGE
 - forward points - gives me a better carry rate for fx shorts? == NO, just cleaner
 - FX HEDGES AS SEPERATE LINE IN MATRIX WITH VOL
+- fx short gate
 
 
