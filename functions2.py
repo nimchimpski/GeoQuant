@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from config import *
 from functions1 import *
 
-def make_fx_map(url, holdings, params, max_age, no_fx, usd_shift) -> dict[str, pd.Series]   :
+def make_fx_map(holdings, params, max_age, no_fx, usd_shift) -> dict[str, pd.Series]   :
     # Pre-fetch FX once per currency (excluding CHF)
     fx_map: dict[str, pd.Series] = {}
     needed_ccy = sorted({h["ccy"].upper() for h in holdings if h["ccy"].upper() != "CHF"})
@@ -18,7 +18,7 @@ def make_fx_map(url, holdings, params, max_age, no_fx, usd_shift) -> dict[str, p
     for ccy in needed_ccy:
         ticker = f'{ccy}CHF.FOREX'
         # Fetch EODHD daily FX and build a Series
-        fx_df = fetch_csv_robust(f'{url}{ticker}', params=params, ticker=ticker, max_age=max_age)
+        fx_df = fetch_csv_robust( params=params, ticker=ticker, max_age=max_age)
         # Normalize and pick close
         fx_s = sort_cols(fx_df).rename(f"{ccy}CHF")
         if (ccy == "USD" and not no_fx and usd_shift):
@@ -79,7 +79,7 @@ def create_asset_close_chf_s(asset_close_local_s: pd.Series, holding: dict, fx_m
         asset_close_chf_s = (asset_close_local_s * fx_aligned).dropna().rename(name)
     return asset_close_chf_s
 
-def fetch_asset_series(url: str, holding: dict, fx_map: dict, params: dict, max_age: int, lookback_days: int) -> pd.Series:
+def fetch_asset_series( holding: dict, fx_map: dict, params: dict, max_age: int, lookback_days: int) -> pd.Series:
 
     ccy   = holding["ccy"].upper()
     # gbx   = h["gbx"]
@@ -88,7 +88,7 @@ def fetch_asset_series(url: str, holding: dict, fx_map: dict, params: dict, max_
         return deal_with_cash(ccy, fx_map, lookback_days)
     else:
         ticker   = holding.get("ticker")
-        px_df = fetch_csv_robust(f'{url}{ticker}', params=params, ticker=ticker, max_age=max_age)
+        px_df = fetch_csv_robust(ticker, params=params, max_age=max_age)
         # Normalize, de-dup, and pick close-like series
         asset_close_local_s = sort_cols(px_df)
         return asset_close_local_s
