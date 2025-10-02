@@ -16,16 +16,13 @@ PROJECT_ROOT = pathlib.Path(__file__).parent.resolve()
 CACHE_DIR = PROJECT_ROOT / "cache"
 CACHE_DIR.mkdir(exist_ok=True)
 
-
-today = time.strftime("%Y-%m-%d")
-START = '2019-5-16'  # global start date for all fetches
+# DATA DOWNLOAD PARAMS
+params = {  'from': '2019-5-16', 
+            'to': time.strftime("%Y-%m-%d"),
+            'api_token': EOD_API,
+            'max_age:' : 24,   # hours
+            'url': 'https://eodhd.com/api/eod/'
+            }
 
 # Module-level debug flag (no new function args). Set RISK_DEBUG=1 in env to enable verbose diagnostics.
 DEBUG = True
-
-params = {  'from': START, 
-            'to': today,
-            'api_token': EOD_API    }
-url = f'https://eodhd.com/api/eod/'
-
-MAX_AGE = 24
