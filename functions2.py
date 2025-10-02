@@ -194,3 +194,11 @@ def _compose_reconfirm(slope: pd.Series,
     # Require down (or strictly below exit threshold) slope to maintain position.
     slope_still_down = slope < slope_exit_threshold
     return slope_still_down & (carry_ok if require_carry else True)
+
+# function to trim series to specified dates
+def trim_series(s: pd.Series, start: str, end: str) -> pd.Series:
+    if start:
+        s = s[s.index >= pd.to_datetime(start)]
+    if end:
+        s = s[s.index <= pd.to_datetime(end)]
+    return s
