@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from config import *
 from functions1 import *
 
-def make_fx_map(holdings, params, max_age, no_fx, usd_shift) -> dict[str, pd.Series]   :
+def make_fx_map(holdings, params, no_fx, usd_shift) -> dict[str, pd.Series]   :
     # Pre-fetch FX once per currency (excluding CHF)
     fx_map: dict[str, pd.Series] = {}
     needed_ccy = sorted({h["ccy"].upper() for h in holdings if h["ccy"].upper() != "CHF"})
@@ -18,7 +18,7 @@ def make_fx_map(holdings, params, max_age, no_fx, usd_shift) -> dict[str, pd.Ser
     for ccy in needed_ccy:
         ticker = f'{ccy}CHF.FOREX'
         # Fetch EODHD daily FX and build a Series
-        fx_df = fetch_csv_robust( params=params, ticker=ticker, max_age=max_age)
+        fx_df = fetch_csv_robust( params=params, ticker=ticker)
         # Normalize and pick close
         fx_s = sort_cols(fx_df).rename(f"{ccy}CHF")
         if (ccy == "USD" and not no_fx and usd_shift):
@@ -28,14 +28,19 @@ def make_fx_map(holdings, params, max_age, no_fx, usd_shift) -> dict[str, pd.Ser
     return fx_map
 
 
-def deal_with_cash(ccy, fx_map, lookback_days):
+def deal_with_cash(ccy, fx_map, window_start, window_end):
     if ccy == 'CHF':
         if fx_map:
             # print('fx_map')
             idx = max((s.index for s in fx_map.values()), key=len)
+            if window_start:
+                idx = idx[idx >= pd.to_datetime(window_start)]
+            if window_end:
+                idx = idx[idx <= pd.to_datetime(window_end)]
             # print(f'idx length {len(idx)}')
         else:
-            idx = pd.date_range(end=pd.to_datetime(datetime.now().strftime('%Y-%m-%d')), periods=lookback_days, freq="B")
+            print('no fx_map in deal with cash()')
+            # idx = pd.date_range(end=pd.to_datetime(datetime.now().strftime('%Y-%m-%d')), periods=lookback_days, freq="B")
         # return a constant series all 1's
         cash_series= pd.Series(1.0, index=idx, name = "CASH_CHF")
         # print(f'length cash_series {len(cash_series)}   ')
@@ -194,3 +199,11 @@ def _compose_reconfirm(slope: pd.Series,
     # Require down (or strictly below exit threshold) slope to maintain position.
     slope_still_down = slope < slope_exit_threshold
     return slope_still_down & (carry_ok if require_carry else True)
+
+# function to trim series to specified dates
+def trim_series(s: pd.Series, start: str, end: str) -> pd.Series:
+    if start:
+        s = s[s.index >= pd.to_datetime(start)]
+    if end:
+        s = s[s.index <= pd.to_datetime(end)]
+    return s

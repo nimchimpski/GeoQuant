@@ -25,6 +25,17 @@ def is_fresh(path: pathlib.Path, max_age: int) -> bool:
 def looks_like_json(payload: bytes) -> bool:
     return payload.lstrip()[:1] in (b"{", b"[")
 
+def check_start_date(df, ticker: str, start: str, ) -> None:
+    earliest = df.index.min().date()
+    # print('data start date:', earliest)
+    # print('required START:', START)
+    gap = (earliest - pd.to_datetime(start).date()).days
+    # print('gap days:', gap)
+    # if gap != 0:
+    #     print('required START:', START,'\ndata start:', earliest)
+    if gap > 5:
+        print(f"WARNING: {ticker} data starts at {earliest}, after global start {start}")
+
 def fetch_csv_robust(ticker: str, params: dict=None,  max_age: int = 24) -> pd.DataFrame:
     """
         Robust CSV fetch with:
@@ -33,25 +44,12 @@ def fetch_csv_robust(ticker: str, params: dict=None,  max_age: int = 24) -> pd.D
       - atomic write on success.
         Returns a parsed DataFrame (index on first column).
         """
-    if params is None:
-        params = {
-            'from': START,
-            'to': time.strftime("%Y-%m-%d"),
-            'api_token': EOD_API
-        }
-    url = f'https://eodhd.com/api/eod/{ticker}'
+    START = params['from']
+    today = params['to']
+    url = params['url']
+    url = f'{url}{ticker}'
     
-    def check_start_date(df):
-        earliest = df.index.min().date()
-        # print('data start date:', earliest)
-        # print('required START:', START)
-        gap = (earliest - pd.to_datetime(START).date()).days
-        # print('gap days:', gap)
 
-        # if gap != 0:
-        #     print('required START:', START,'\ndata start:', earliest)
-        if gap > 5:
-            print(f"WARNING: {ticker} data starts at {earliest}, after global start {START}")
     # print(f'params: {params}')
     path = cache_path( ticker)
 
@@ -59,7 +57,7 @@ def fetch_csv_robust(ticker: str, params: dict=None,  max_age: int = 24) -> pd.D
     if is_fresh(path, max_age):
         # print(f"{ticker} - using cached data")
         df = pd.read_csv(path, header=0, parse_dates=[0], index_col=0).sort_index()
-        check_start_date(df)
+        check_start_date(df, ticker, START)
         return df
     print(f"{ticker} - downloading fresh data")
     resp = requests.get(url, params=params)
