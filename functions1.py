@@ -77,7 +77,7 @@ def fetch_csv_robust(ticker: str, params: dict=None,  max_age: int = 24) -> pd.D
 
     # Parse CSV and normalize
     df = pd.read_csv(io.BytesIO(raw), header=0, parse_dates=[0], index_col=0).sort_index()
-    check_start_date(df)
+    check_start_date(df, ticker, START)
     print('saving ', path)
     # Atomic-ish write
     tmp = path.with_suffix(".tmp")

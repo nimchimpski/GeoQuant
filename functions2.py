@@ -5,10 +5,13 @@ import numpy as np
 from dotenv import load_dotenv
 import re
 import matplotlib.pyplot as plt
+from typing import Tuple, Dict
+
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
 from config import *
-from functions1 import *
+import functions1
+import config
 
 def make_fx_map(holdings, params, no_fx, usd_shift) -> dict[str, pd.Series]   :
     # Pre-fetch FX once per currency (excluding CHF)
@@ -18,11 +21,11 @@ def make_fx_map(holdings, params, no_fx, usd_shift) -> dict[str, pd.Series]   :
     for ccy in needed_ccy:
         ticker = f'{ccy}CHF.FOREX'
         # Fetch EODHD daily FX and build a Series
-        fx_df = fetch_csv_robust( params=params, ticker=ticker)
+        fx_df = functions1.fetch_csv_robust( params=params, ticker=ticker)
         # Normalize and pick close
-        fx_s = sort_cols(fx_df).rename(f"{ccy}CHF")
+        fx_s = functions1.sort_cols(fx_df).rename(f"{ccy}CHF")
         if (ccy == "USD" and not no_fx and usd_shift):
-            fx_s = shift_usd_fx_next_day(fx_s)
+            fx_s = functions1.shift_usd_fx_next_day(fx_s)
             print("    Applied USDCHF T+1 shift")
         fx_map[f'{ccy}CHF'] = fx_s
     return fx_map
@@ -207,3 +210,9 @@ def trim_series(s: pd.Series, start: str, end: str) -> pd.Series:
     if end:
         s = s[s.index <= pd.to_datetime(end)]
     return s
+
+def get_window_dates(s: pd.Series) -> Tuple[pd.Timestamp, pd.Timestamp]:
+    end_date = s.index[-1]
+    start_date = s.index[1]
+    return start_date, end_date
+
