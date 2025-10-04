@@ -5,14 +5,13 @@ import numpy as np
 from dotenv import load_dotenv
 import re
 import matplotlib.pyplot as plt
-
+import itertools, math
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
 from fxshort_gates import fxshort_gate, wave_rider
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Iterable, Callable
 import functions2
 import fxshort_gates
-
 
 
 def analyze_gate_trades(price: pd.Series,
@@ -122,19 +121,8 @@ def analyze_gate_trades(price: pd.Series,
 
     return trades_df, summary
 
-import itertools, math
-import pandas as pd
-import numpy as np
-from typing import Iterable, Callable
 
-# Import from the notebook context if run inside VS Code interactive;
-# else adapt to your module path.
-# from fxshort_asym_copi import (
-#     standardize_fx_daily_index,
-#     fxshort_gate,
-#     fxshort_gate_simple,
-#     analyze_gate_trades,
-# )
+
 
 def _coerce_float(d: dict) -> dict:
     out = {}
@@ -215,7 +203,9 @@ def sweep_fxshort_gate(
         if stats.get("trades", 0) < min_trades:
             continue
         rec = {
-
+            "ticker": ticker,       
+            "start_date": start_date,
+            "end_date": end_date,
             "slope_window": slope_w,
             "consec": consec,
             "slope_entry_thr": ent_thr,
@@ -244,11 +234,14 @@ def sweep_fxshort_gate(
     ).reset_index(drop=True)
 
     topgate = df.iloc[0]['gate']
-    print('topgate',topgate)
+    # print('topgate',topgate.tail(5))
     fxshort_gates.plot_gate_state(ticker, s, topgate)
+
 
     # print(f'dfhead:\n{df.head(1)}')
     df = df.head(1)
+    # remove gate from final output to save space
+    df=df.drop(columns=['gate'])
     return df, start_date, end_date
 
 def summarize_top(df: pd.DataFrame, top: int = 10) -> pd.DataFrame:
