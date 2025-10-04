@@ -2,6 +2,7 @@ import numpy as np
 from scipy import stats
 from typing import Tuple, Dict
 import pandas as pd
+import matplotlib.pyplot as plt
 from functions2 import standardize_fx_daily_index
 
 
@@ -110,15 +111,17 @@ def _rolling_ols_slope(log_price: pd.Series, window: int) -> pd.Series:
 
 def fxshort_gate(
     gbpchf: pd.Series,
-    carry_ann: float = 0.04,
     slope_window: int = 40,
     consec: int = 1,
-    buffer20: float = 0.002,
     slope_entry_threshold: float = 0.0,
     slope_exit_threshold: float = 0.0,
     require_carry: bool = False,
-    shift_for_signal: bool = True,
     consec_rises_kill: int = 1,
+    shift_for_signal: bool = True,
+    carry_ann: float = 0.04,
+    buffer20: float = 0.002,
+
+
 ) -> pd.Series:
     """
     Minimal FX short gate:
@@ -259,3 +262,33 @@ def fxshort_gate_simple_asym(
         gate_state.iloc[i] = in_pos
     gate_state = gate_state.shift(1, fill_value=False) if shift_for_signal else gate_state
     return gate_state.rename("GBPCHF_short_gate_simple_asym")
+
+def plot_gate_state(ticker: str, s: pd.Series, gate_stateon: pd.Series) -> None:
+    plt.style.use('dark_background')
+
+    TAIL_BARS = 1000
+    # Use Mon–Fri only for plotting to avoid weekend prints often present in FX feeds
+    # s=s.tail(200)
+    s_std_plot = standardize_fx_daily_index(s)
+
+    # Select tail for plotting
+    s_plot = s_std_plot.tail(TAIL_BARS) if TAIL_BARS else s_std_plot
+    fig, ax = plt.subplots(figsize=(11, 6))
+    # Base price plot
+    s_plot.plot(ax=ax, color='steelblue', lw=1.2, label=ticker)
+    # Align gate_state to price index (gate is Mon–Fri too)
+    g = gate_stateon.reindex(s_plot.index).fillna(False).astype(bool)
+    # print(f'gateon aligned to price (last 20 rows):\n{gate_stateon}')
+    # Overlay markers colored by gate_state state on the price series
+    colors = np.where(g.values, 'crimson', 'blue')
+    ax.scatter(s_plot.index, s_plot.values, c=colors, s=12, zorder=3)
+    # Legend: include price and gate_state state keys
+    from matplotlib.lines import Line2D
+    handles, labels = ax.get_legend_handles_labels()
+    gate_true = Line2D([0],[0], marker='o', color='w', label='Gate True', markerfacecolor='crimson', markersize=6)
+    gate_false = Line2D([0],[0], marker='o', color='w', label='Gate False', markerfacecolor='blue', markeredgecolor='gray', markersize=6)
+    ax.legend(handles + [gate_true, gate_false], labels + ['Gate True','Gate False'], loc='upper left')
+    ax.set_title(f'{ticker}CHF with gate_state True/False markers (Mon–Fri)')
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.show()

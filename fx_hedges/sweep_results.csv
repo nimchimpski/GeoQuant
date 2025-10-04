@@ -1,0 +1,3 @@
+ticker,start_date,end_date,slope_window,consec,slope_entry_thr,slope_exit_thr,require_carry,consec_rises_kill,carry_ann,buffer20,trades,win_rate,total_pct_return,avg_pct_return,avg_win,avg_loss,expectancy_per_trade,median_holding_days,avg_MFE_pct,avg_MAE_pct,max_draw_trade_pct,best_trade_pct,net_expectancy_per_trade
+USDCHF.FOREX,2025-01-03,2025-10-03,4,1,0.0,0.0,False,1,0.04,0.002,42,0.381,-0.027,-0.001,0.006,-0.005,-0.001,2.0,0.003,0.004,-0.027,0.028,-0.001
+USDCHF.FOREX,2025-01-03,2025-10-03,10,2,-0.0,0.0,False,2,0.04,0.002,23,0.739,0.07,0.003,0.007,-0.009,0.003,4.0,0.008,0.003,-0.025,0.038,0.002

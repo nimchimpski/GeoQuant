@@ -23,8 +23,8 @@ IBKR_live = [
     {"name": "YCA", "ticker": "YCA.LSE", "ccy": "GBP", "USD_exposure": 1.0, "gbx":True, "position": 258},
     {"name":"VEU",     "ticker":"VEU.US", "ccy":"USD", "GBP_exposure": 0.13,"gbx":False, "position": 68,},
 
-    {"name": "CASH_CHF", "type": "cash", "ccy": "CHF", "amount": 9678},
-    {"name": "CASH_GBP", "type": "cash", "ccy": "GBP", "amount": -9050, "risk_fx": True },
+    {"name": "CASH_CHF", "type": "cash", "ccy": "CHF", "amount": 9679},
+    {"name": "CASH_GBP", "type": "cash", "ccy": "GBP", "amount": -9670, "risk_fx": True },
     {"name": "CASH_USD", "type": "cash", "ccy": "USD", "amount": 0},
 ]
 IBKR_sim =[

@@ -5,12 +5,13 @@ import numpy as np
 from dotenv import load_dotenv
 import re
 import matplotlib.pyplot as plt
+import itertools, math
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
 from fxshort_gates import fxshort_gate, wave_rider
-from typing import Tuple, Dict
-from functions2 import standardize_fx_daily_index
-
+from typing import Tuple, Dict, Iterable, Callable
+import functions2
+import fxshort_gates
 
 
 def analyze_gate_trades(price: pd.Series,
@@ -120,19 +121,8 @@ def analyze_gate_trades(price: pd.Series,
 
     return trades_df, summary
 
-import itertools, math
-import pandas as pd
-import numpy as np
-from typing import Iterable, Callable
 
-# Import from the notebook context if run inside VS Code interactive;
-# else adapt to your module path.
-# from fxshort_asym_copi import (
-#     standardize_fx_daily_index,
-#     fxshort_gate,
-#     fxshort_gate_simple,
-#     analyze_gate_trades,
-# )
+
 
 def _coerce_float(d: dict) -> dict:
     out = {}
@@ -144,37 +134,43 @@ def _coerce_float(d: dict) -> dict:
     return out
 
 def sweep_fxshort_gate(
+    ticker: str,
     price: pd.Series,
     gate_fn: Callable = fxshort_gate,
-    carry_ann_vals: Iterable[float] = (0.04,),
     slope_window_vals: Iterable[int] = (5, 6, 8, 10, 15, 20),
     consec_vals: Iterable[int] = (1, 2, 3),
     slope_entry_thr_vals: Iterable[float] = (0.0, -1e-4, -5e-4),
     slope_exit_thr_offsets: Iterable[float] = (0.0, 1e-4, 3e-4),
     require_carry_vals: Iterable[bool] = (False, True),
     consec_rises_kill_vals: Iterable[int] = (0, 1, 2),
+    carry_ann_vals: Iterable[float] = (0.04,),
     buffer20_vals: Iterable[float] = (0.002,),
     max_combos: int | None = None,
     rank_key: str = "net_expectancy_per_trade",
     min_trades: int = 30,
-) -> pd.DataFrame:
+) -> Tuple[pd.DataFrame, pd.Timestamp, pd.Timestamp]:
     """
     Parameter sweep for fxshort gates.
     slope_exit_threshold = slope_entry_threshold + offset (hysteresis).
     """
-    s = standardize_fx_daily_index(price)
+    s = functions2.standardize_fx_daily_index(price)
+    start_date, end_date = functions2.get_window_dates(s)
+
     combos = itertools.product(
-        carry_ann_vals,
         slope_window_vals,
         consec_vals,
         slope_entry_thr_vals,
         slope_exit_thr_offsets,
         require_carry_vals,
         consec_rises_kill_vals,
+        carry_ann_vals,
         buffer20_vals,
     )
+
+
     records = []
-    for idx, (carry_ann, slope_w, consec, ent_thr, exit_off, req_carry, rises_kill, buf20) in enumerate(combos):
+    for idx, ( slope_w, consec, ent_thr, exit_off, req_carry, rises_kill, carry_ann, buf20) in enumerate(combos):
+        # print('idx', idx+1, '\n')
         if max_combos and idx >= max_combos:
             break
         exit_thr = ent_thr + exit_off
@@ -202,20 +198,23 @@ def sweep_fxshort_gate(
             # Recompute stats on net_pct_return
             net_expectancy = trades["net_pct_return"].mean()
             stats["net_expectancy_per_trade"] = net_expectancy
-
         except Exception as e:
             continue
         if stats.get("trades", 0) < min_trades:
             continue
         rec = {
-            "carry_ann": carry_ann,
+            "ticker": ticker,       
+            "start_date": start_date,
+            "end_date": end_date,
             "slope_window": slope_w,
             "consec": consec,
             "slope_entry_thr": ent_thr,
             "slope_exit_thr": exit_thr,
             "require_carry": req_carry,
             "consec_rises_kill": rises_kill,
+            "carry_ann": carry_ann,
             "buffer20": buf20,
+            "gate": gate
         }
         rec.update(_coerce_float(stats))
         records.append(rec)
@@ -226,12 +225,24 @@ def sweep_fxshort_gate(
     rk = rank_key
     if rk not in df.columns:
         raise ValueError(f"rank_key {rk} not in results")
+
+
     df = df.sort_values(
         [rk, "total_pct_return", "win_rate"],
         ascending=[False, False, False],
         kind="mergesort"
     ).reset_index(drop=True)
-    return df
+
+    topgate = df.iloc[0]['gate']
+    # print('topgate',topgate.tail(5))
+    fxshort_gates.plot_gate_state(ticker, s, topgate)
+
+
+    # print(f'dfhead:\n{df.head(1)}')
+    df = df.head(1)
+    # remove gate from final output to save space
+    df=df.drop(columns=['gate'])
+    return df, start_date, end_date
 
 def summarize_top(df: pd.DataFrame, top: int = 10) -> pd.DataFrame:
     cols = [
