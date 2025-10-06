@@ -216,3 +216,30 @@ def get_window_dates(s: pd.Series) -> Tuple[pd.Timestamp, pd.Timestamp]:
     start_date = s.index[1]
     return start_date, end_date
 
+def plotter(ticker, prices, gate_stateon=None, TAIL_BARS=1000,):
+    plt.style.use('dark_background')   
+
+    # Select tail for plotting
+    s_plot = prices.tail(TAIL_BARS) if TAIL_BARS else prices
+    fig, ax = plt.subplots(figsize=(11, 6))
+    # Base price plot
+    s_plot.plot(ax=ax, color='steelblue', lw=1.2, label=ticker)
+
+    if gate_stateon:
+ 
+        # Align gate_state to price index (gate is Mon–Fri too)
+        g = gate_stateon.reindex(s_plot.index).fillna(False).astype(bool)
+        # print(f'gateon aligned to price (last 20 rows):\n{gate_stateon}')
+        # Overlay markers colored by gate_state state on the price series
+        colors = np.where(g.values, 'crimson', 'blue')
+        ax.scatter(s_plot.index, s_plot.values, c=colors, s=12, zorder=3)
+        # Legend: include price and gate_state state keys
+        from matplotlib.lines import Line2D
+        handles, labels = ax.get_legend_handles_labels()
+        gate_true = Line2D([0],[0], marker='o', color='w', label='Gate True', markerfacecolor='crimson', markersize=6)
+        gate_false = Line2D([0],[0], marker='o', color='w', label='Gate False', markerfacecolor='blue', markeredgecolor='gray', markersize=6)
+        ax.legend(handles + [gate_true, gate_false], labels + ['Gate True','Gate False'], loc='upper left')
+        ax.set_title(f'{ticker}CHF with gate_state True/False markers (Mon–Fri)')
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.show()

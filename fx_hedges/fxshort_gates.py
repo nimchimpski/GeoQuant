@@ -8,7 +8,6 @@ import matplotlib.pyplot as plt
 import itertools, math
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
-from fxshort_gates import fxshort_gate, wave_rider
 from typing import Tuple, Dict, Iterable, Callable
 
 import functions2
