@@ -11,7 +11,7 @@ computershare = [
 ]
 IBKR_live = [
     {"name":"EMIM",     "ticker":"EMIM.LSE", "ccy":"GBP", "gbx":True, "position": 172},
-    # {"name":"ERNS",     "ticker":"ERNS.LSE", "ccy":"GBP", "GBP_exposure": 1.00, "gbx":False, "position": 89, 'risk_fx': False},
+    {"name":"ERNS",     "ticker":"ERNS.LSE", "ccy":"GBP", "GBP_exposure": 1.00, "gbx":False, "position": 89, 'risk_fx': True},
     {"name":"HEAL",     "ticker":"HEAL.LSE", "ccy":"GBP", "USD_exposure": 0.65, "GBP_exposure": 0.03,"gbx":False, "position": 180},
     {"name":"IBM",     "ticker":"IBM.US", "ccy":"USD", "USD_exposure": 1.00,"gbx":False, "position": 9},
 
@@ -22,8 +22,9 @@ IBKR_live = [
     {"name": "SIKA", "ticker": "SIKA.SW", "ccy": "CHF", "gbx":False, "position": -9},
     {"name": "YCA", "ticker": "YCA.LSE", "ccy": "GBP", "USD_exposure": 1.0, "gbx":True, "position": 258},
     {"name":"VEU",     "ticker":"VEU.US", "ccy":"USD", "GBP_exposure": 0.13,"gbx":False, "position": 68,},
+    {"name":"IWDC",     "ticker":"IWDC.SW", "ccy":"CHF", "USD_exposure": 0.72, "GBP_exposure": 0.035,"gbx":False, "position": 100, "risk_fx": False },
 
-    {"name": "CASH_CHF", "type": "cash", "ccy": "CHF", "amount": 9679},
+    {"name": "CASH_CHF", "type": "cash", "ccy": "CHF", "amount": 1156},
     {"name": "CASH_GBP", "type": "cash", "ccy": "GBP", "amount": -9054, "risk_fx": True },
     {"name": "CASH_USD", "type": "cash", "ccy": "USD", "amount": 0},
 ]
