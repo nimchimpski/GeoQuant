@@ -10,7 +10,7 @@ from typing import Tuple, Dict
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
 from config import *
-import functions1
+import functions1 as fi
 import config
 
 def make_fx_map(holdings, params, no_fx, usd_shift) -> dict[str, pd.Series]   :
@@ -87,19 +87,19 @@ def create_asset_close_chf_s(asset_close_local_s: pd.Series, holding: dict, fx_m
         asset_close_chf_s = (asset_close_local_s * fx_aligned).dropna().rename(name)
     return asset_close_chf_s
 
-def fetch_asset_series( holding: dict, fx_map: dict, params: dict, max_age: int, lookback_days: int) -> pd.Series:
+# def fetch_asset_series( holding: dict, fx_map: dict, params: dict, max_age: int, lookback_days: int) -> pd.Series:
 
-    ccy   = holding["ccy"].upper()
-    # gbx   = h["gbx"]
-    # HANDLE CASH AS SPECIAL CASE
-    if holding.get("type", "").lower() == "cash":
-        return deal_with_cash(ccy, fx_map, lookback_days)
-    else:
-        ticker   = holding.get("ticker")
-        px_df = fetch_csv_robust(ticker, params=params, max_age=max_age)
-        # Normalize, de-dup, and pick close-like series
-        asset_close_local_s = sort_cols(px_df)
-        return asset_close_local_s
+#     ccy   = holding["ccy"].upper()
+#     # gbx   = h["gbx"]
+#     # HANDLE CASH AS SPECIAL CASE
+#     if holding.get("type", "").lower() == "cash":
+#         return deal_with_cash(ccy, fx_map, lookback_days)
+#     else:
+#         ticker   = holding.get("ticker")
+#         px_df = f1.fetch_csv_robust(ticker, params=params, max_age=max_age)
+#         # Normalize, de-dup, and pick close-like series
+#         asset_close_local_s = f1.sort_cols(px_df)
+#         return asset_close_local_s
     
 def get_holding_value_chf(h: dict, fx_map: dict, assets_close_local_df: pd.DataFrame, assets_close_chf_df: pd.DataFrame, asof: str) -> float:
         # print('++++++++in get_holding_value_chf ++++++++')
@@ -180,36 +180,8 @@ def norm_risk_fx(val) -> bool:
         return bool(val)
     return True
 
-
-
-def _k_confirm(signal: pd.Series, k: int) -> pd.Series:
-    if k <= 1:
-        return signal.astype(bool)
-    return (
-        signal.astype("int8")
-        .rolling(k, min_periods=k)
-        .sum()
-        .ge(k)
-        .astype(bool)
-    )
-
-def _compose_entry_signal(slope: pd.Series,
-                          slope_entry_threshold: float,
-                          carry_ok: pd.Series,
-                          require_carry: bool) -> pd.Series:
-    slope_down = (slope <= slope_entry_threshold)
-    return slope_down & (carry_ok if require_carry else True)
-
-def _compose_reconfirm(slope: pd.Series,
-                       slope_exit_threshold: float,
-                       carry_ok: pd.Series,
-                       require_carry: bool) -> pd.Series:
-    # Require down (or strictly below exit threshold) slope to maintain position.
-    slope_still_down = slope < slope_exit_threshold
-    return slope_still_down & (carry_ok if require_carry else True)
-
 # function to trim series to specified dates
-def trim_series(s: pd.Series, start: str, end: str) -> pd.Series:
+def trim_series(s: pd.Series, start: str, end: str=None) -> pd.Series:
     if start:
         s = s[s.index >= pd.to_datetime(start)]
     if end:
