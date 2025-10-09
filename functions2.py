@@ -17,7 +17,7 @@ def make_fx_map(holdings, params, no_fx, usd_shift) -> dict[str, pd.Series]   :
     # Pre-fetch FX once per currency (excluding CHF)
     fx_map: dict[str, pd.Series] = {}
     needed_ccy = sorted({h["ccy"].upper() for h in holdings if h["ccy"].upper() != "CHF"})
-    print('-------------fetching currencies-------------')
+    # print('-------------fetching currencies-------------')
     for ccy in needed_ccy:
         ticker = f'{ccy}CHF.FOREX'
         # Fetch EODHD daily FX and build a Series
@@ -102,12 +102,15 @@ def fetch_asset_series( holding: dict, fx_map: dict, params: dict, max_age: int,
         return asset_close_local_s
     
 def get_holding_value_chf(h: dict, fx_map: dict, assets_close_local_df: pd.DataFrame, assets_close_chf_df: pd.DataFrame, asof: str) -> float:
+        # print('++++++++in get_holding_value_chf ++++++++')
+        # print(f'Valuing {h["name"]} as of {asof}')
         name = h['name']
         typ = h.get('type', '').lower()
         ccy = h.get('ccy', '').upper()
         position = float(h.get('position', 0.0))
         # CASH ASSETS
         if 'CASH' in name:
+            # print('    Cash asset')
         # if typ == 'cash':
             if ccy == 'CHF':
                 return float(h['amount'])
@@ -123,6 +126,7 @@ def get_holding_value_chf(h: dict, fx_map: dict, assets_close_local_df: pd.DataF
                 return float(h['amount']) * float(last_fx)
         else:
             # NON-CASH ASSETS: ALWAYS VALUE IN CHF AT THE COMMON AS-OF DATE
+            # print('    Non-cash asset')
             if ccy == 'CHF':
                 last_local = assets_close_local_df[name].reindex([asof]).iloc[-1]
                 return float(last_local) * position
@@ -139,6 +143,7 @@ def get_holding_value_chf(h: dict, fx_map: dict, assets_close_local_df: pd.DataF
                 return  float(last_local) * float(last_fx) * position
             else:
                 # ALREADY CHF-CONVERTED SERIES (AND ALIGNED) – USE THE AS-OF PRICE
+                # print('    Unhedged in risk, so use CHF series')
                 return float(assets_close_chf_df[name].reindex([asof]).iloc[-1]) * position
             
 def _log_returns(s: pd.Series) -> pd.Series:
