@@ -2,5 +2,14 @@
     "editor.wordWrap": "on",
     "editor.codeLens": false,
     "files.autoSave": "onWindowChange",
-    "editor.codeActionWidget.includeNearbyQuickFixes": true
+    "editor.codeActionWidget.includeNearbyQuickFixes": true,
+    "editor.quickSuggestions": {
+        "other": "off"
+    },
+    "editor.parameterHints.cycle": false,
+    "editor.parameterHints.enabled": false,
+    "editor.hover.above": false,
+    "editor.hover.enabled": false,
+    "editor.hover.sticky": false,
+    "editor.lightbulb.enabled": "off"
 }

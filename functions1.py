@@ -6,6 +6,7 @@ import pathlib
 import requests
 import pandas as pd
 from config import *
+import functions2 as f2
 
 
 def cache_path( ticker: str) -> pathlib.Path:
@@ -121,7 +122,7 @@ def sort_cols(df):
     if not df.index.is_monotonic_increasing: 
         print('index wasnt sorted')
         df = df.sort_index()
-    df = df[~df.index.duplicated(keep='last')]
+    # df = df[~df.index.duplicated(keep='last')]
     df = df[df.index.dayofweek < 5] # ?????
     df.index = pd.to_datetime(df.index)
     # s = pick_close_column(df).astype('float64')
@@ -137,5 +138,4 @@ def shift_usd_fx_next_day(fx_series: pd.Series) -> pd.Series:
     if not isinstance(fx_series, pd.Series):
         raise TypeError("fx_series must be a pandas Series")
     return fx_series.shift(-1)
-
 
