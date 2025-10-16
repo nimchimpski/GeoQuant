@@ -32,26 +32,13 @@ def make_fx_map(holdings, params, no_fx, usd_shift) -> dict[str, pd.Series]   :
     return fx_map
 
 
-def deal_with_cash(ccy, fx_map, window_start, window_end):
+def make_cash_series(ccy, fx_map):
     if ccy == 'CHF':
-        if fx_map:
-            # print('fx_map')
-            idx = max((s.index for s in fx_map.values()), key=len)
-            if window_start:
-                idx = idx[idx >= pd.to_datetime(window_start)]
-            if window_end:
-                idx = idx[idx <= pd.to_datetime(window_end)]
-            # print(f'idx length {len(idx)}')
-        else:
-            print('no fx_map in deal with cash()')
-            # idx = pd.date_range(end=pd.to_datetime(datetime.now().strftime('%Y-%m-%d')), periods=lookback_days, freq="B")
-        # return a constant series all 1's
-        cash_series= pd.Series(1.0, index=idx, name = "CASH_CHF")
-        # print(f'length cash_series {len(cash_series)}   ')
-        return cash_series
+        # MAKE THE CHF 1'S SERIES AT LEAST AS LONG AS THE LONGEST FX SERIES
+        idx = max((s.index for s in fx_map.values()), key=len)
+        return  pd.Series(1.0, index=idx, name = "CASH_CHF")
     else:
-        cash_series = fx_map.get(f'{ccy}CHF').copy().rename(f'CASH_{ccy}')
-        return cash_series
+        return  fx_map.get(f'{ccy}CHF').copy().rename(f'CASH_{ccy}')
 
 
     
@@ -217,11 +204,13 @@ def plotter(ticker, prices, gate_stateon=None, TAIL_BARS=1000,):
     plt.tight_layout()
     plt.show()
 
-fx_map = f2.make_fx_map(holdings, params, no_fx, usd_shift)
-if DEBUG:
-    print(f">>>FX keys loaded: {list(fx_map.keys())}")
 
-def build_base_ccy_assets_px_df(holdings, fx_map, params):
+def deal_with_gbx(close_local_s: pd.Series, ccy: str, gbx:bool) -> pd.Series:
+    if gbx and ccy == 'GBP':
+        return close_local_s / 100.0
+    return close_local_s
+
+def base_ccy_assets_px_df(holdings, fx_map, params, ohcl):
     # ------------BUILD CHF CLOSE SERIES PER ASSET-------------------
 
 
@@ -229,61 +218,47 @@ def build_base_ccy_assets_px_df(holdings, fx_map, params):
     assets_close_chf_df = pd.DataFrame()
     for h in holdings:
         name = h['name']
-        # print(f'>>>>>>>>>>>>>> Processing {name} >>>>>>>>')
-        ccy   = h["ccy"].upper()
+        ccy = h.get('ccy','').upper()
+        gbx   = h.get("gbx",False)
+        include_fx = h.get('include_fx_vol', True)
+        is_cash = h.get('type', '').lower() == 'cash'
 
-        if h.get("type", "").lower() == "cash":
-            asset_close_local_s = f2.deal_with_cash(ccy, fx_map)
-        else:
+        # MAKE THE LOCAL SERIES
+        #  CASH
+        if is_cash:
+            chf_s = f2.make_cash_series(local_s, ccy, fx_map)
+            if not include_fx:
+                chf_s = pd.Series(1.0, index=chf_s.index, name=name)
+
+        # DECIDE IF LEAVE IN LOCAL CCY (REMOVE FX VOL)
+        #  NOT CASH + fx = true + ccy != chf
+        else: 
             ticker   = h.get("ticker")
             px_df = f1.fetch_csv_robust(ticker, params=params)
-            asset_close_local_s = f1.sort_cols(px_df)
-        # print('asset close local s', asset_close_local_s.iloc[-1])    
-        assets_close_local_df[name] = asset_close_local_s
-        ccy = h.get('ccy','').upper()
+            local_s = f1.sort_cols(px_df, ohcl) 
 
-        # DEAL WITH GBX
-        gbx = bool(h.get('gbx', False))
-        if gbx and ccy != 'GBP':
-            raise ValueError(f"gbx=True only valid for GBP assets, got {name} in {ccy}")
-        series_local = asset_close_local_s / 100.0 if gbx else asset_close_local_s
-
-        # DECIDE IF TO REMOVE FX VOL IN RETURNS
-        include_fx_vol_bool = h.get('include_fx_vol', True)
-        if include_fx_vol_bool == False:
-            print(f"Removing FX vol for {name} ({ccy}), is this hedged?")
-        if ccy == 'CHF' or no_fx or (not include_fx_vol_bool) or h.get('type','').lower()=='cash':
-            # print(f'No FX conversion for {name} ({ccy})')
-            asset_close_chf_s = series_local.rename(name)
-        else:
-            # OTHERWISE INCLUDE FX VOL
-            # print(f'Converting {name} from {ccy} to CHF')
+            local_s = deal_with_gbx(local_s)
+        if ccy != 'CHF' and include_fx:
             fx = fx_map.get(f"{ccy}CHF", pd.Series(dtype=float))
-
-            fx_aligned = fx.reindex(series_local.index).ffill()
+            fx_aligned = fx.reindex(local_s.index).ffill()
             # ensure last value available even if FX lags one or two days
             if fx_aligned.iloc[-1] != fx_aligned.dropna().iloc[-1]:
                 fx_aligned.iloc[-1] = fx_aligned.dropna().iloc[-1]
-            asset_close_chf_s = (series_local * fx_aligned).rename(name)
 
-            # print(f'CHF close last for {name}: {asset_close_chf_s.iloc[-1]}')
-        assets_close_chf_df[name] = asset_close_chf_s
+            # MULTIPLY LOCAL BY FX
+            chf_s = (local_s * fx_aligned).rename(name)
 
-    hedged_cash = [
-        h['name'] for h in holdings
-        if h.get('type','').lower() == 'cash' and h.get('include_fx_vol')
-    ]
-    for n in hedged_cash:
-        if n in assets_close_chf_df.columns:
-            assets_close_chf_df[n] = 1.0
+        else:
+             # OTHERWISE INCLUDE FX VOL
+            print(f'No FX conversion/vol for {name} ({ccy})')
+            chf_s =local_s.rename(name)
+
+        # STORE THE LOCAL AND CHF SERIES
+        assets_close_chf_df[name] = chf_s
 
 
     # ALIGN ON COMMON DATES
     prices_df = assets_close_chf_df.dropna(how="any")   
-    if DEBUG and not prices_df.empty:
-        print(
-            f">>>Common window: {prices_df.index.min().date()} → {prices_df.index.max().date()} "
-            f"({len(prices_df)} rows before tail)"
-        )
     # TRIM
-    prices_df = f2.trim_series(prices_df, window_start, window_end)
+    prices_df = f2.trim_series(prices_df, params['from'], params['to'])
+    return prices_df
