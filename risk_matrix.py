@@ -31,6 +31,7 @@ def build_returns_matrix_in_chf(
     no_fx: bool = False,
     usd_shift: bool = False,
     DEBUG: bool = False,
+    ohlc: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
     """
     Build CHF daily returns matrix for the provided holdings.
@@ -71,11 +72,11 @@ def build_returns_matrix_in_chf(
         ccy   = h["ccy"].upper()
 
         if h.get("type", "").lower() == "cash":
-            asset_close_local_s = f2.deal_with_cash(ccy, fx_map, window_start, window_end)
+            asset_close_local_s = f2.cash_series(ccy, fx_map)
         else:
             ticker   = h.get("ticker")
             px_df = f1.fetch_csv_robust(ticker, params=params)
-            asset_close_local_s = f1.sort_cols(px_df)
+            asset_close_local_s = f1.sort_cols(px_df, ohlc)
         # print('asset close local s', asset_close_local_s.iloc[-1])    
         assets_close_local_df[name] = asset_close_local_s
         ccy = h.get('ccy','').upper()

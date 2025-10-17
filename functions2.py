@@ -14,7 +14,7 @@ import functions1 as f1
 import functions2 as f2
 import config
 
-def make_fx_map(holdings, params, no_fx, usd_shift) -> dict[str, pd.Series]   :
+def make_fx_map(holdings, params, usd_shift=True, ohlc=False) -> dict[str, pd.Series]   :
     # Pre-fetch FX once per currency (excluding CHF)
     fx_map: dict[str, pd.Series] = {}
     needed_ccy = sorted({h["ccy"].upper() for h in holdings if h["ccy"].upper() != "CHF"})
@@ -24,15 +24,17 @@ def make_fx_map(holdings, params, no_fx, usd_shift) -> dict[str, pd.Series]   :
         # Fetch EODHD daily FX and build a Series
         fx_df = f1.fetch_csv_robust( params=params, ticker=ticker)
         # Normalize and pick close
-        fx_s = f1.sort_cols(fx_df).rename(f"{ccy}CHF")
-        if (ccy == "USD" and not no_fx and usd_shift):
+        fx_s = f1.sort_cols(fx_df, ohlc)
+        if not ohlc:
+            fx_s = fx_s.rename(f"{ccy}CHF")
+        if (ccy == "USD"  and usd_shift):
             fx_s = f1.shift_usd_fx_next_day(fx_s)
             print("    Applied USDCHF T+1 shift")
         fx_map[f'{ccy}CHF'] = fx_s
     return fx_map
 
 
-def make_cash_series(ccy, fx_map):
+def cash_series(ccy, fx_map):
     if ccy == 'CHF':
         # MAKE THE CHF 1'S SERIES AT LEAST AS LONG AS THE LONGEST FX SERIES
         idx = max((s.index for s in fx_map.values()), key=len)
@@ -210,55 +212,122 @@ def deal_with_gbx(close_local_s: pd.Series, ccy: str, gbx:bool) -> pd.Series:
         return close_local_s / 100.0
     return close_local_s
 
-def base_ccy_assets_px_df(holdings, fx_map, params, ohcl):
-    # ------------BUILD CHF CLOSE SERIES PER ASSET-------------------
+# ...existing imports...
 
+def base_ccy_assets_px_df(holdings, fx_map, params, ohlc=False):
+    """
+    Build CHF risk series.
+    - ohlc=False: returns a single Close-only DataFrame (Adjusted Close preferred)
+    - ohlc=True:  returns (high_df, low_df, close_df) using unadjusted OHLC, all CHF-aligned
+    Conversion rules:
+      * Non-cash: if include_fx and ccy != CHF -> multiply by FX Close; else keep local (no FX vol)
+      * Cash:     if include_fx:
+                     CHF -> flat 1.0; non-CHF -> FX Close; (OHLC all equal to Close)
+                  else flat 1.0 (hedged cash)
+    """
+    close_cols = {}
+    high_cols, low_cols = ({}, {}) if ohlc else (None, None)
 
-    assets_close_local_df = pd.DataFrame()
-    assets_close_chf_df = pd.DataFrame()
+    from_dt = params.get("from")
+    to_dt = params.get("to")
+    local_close_df = pd.DataFrame()
     for h in holdings:
-        name = h['name']
-        ccy = h.get('ccy','').upper()
-        gbx   = h.get("gbx",False)
-        include_fx = h.get('include_fx_vol', True)
-        is_cash = h.get('type', '').lower() == 'cash'
+        name = h["name"]
+        ccy = h.get("ccy", "").upper()
+        is_cash = h.get("type", "").lower() == "cash"
+        gbx = bool(h.get("gbx", False))
+        include_fx = bool(h.get("include_fx_vol", True))
 
-        # MAKE THE LOCAL SERIES
-        #  CASH
         if is_cash:
-            chf_s = f2.make_cash_series(local_s, ccy, fx_map)
-            if not include_fx:
-                chf_s = pd.Series(1.0, index=chf_s.index, name=name)
+            # Cash path
+            if ccy == "CHF":
+                # Build a business-day index if possible; will be realigned later anyway
+                idx = pd.date_range(from_dt, to_dt, freq="B") if (from_dt and to_dt) else None
+                base_close = pd.Series(1.0, index=idx, name=name)
+            else:
+                fx = fx_map.get(f"{ccy}CHF", pd.DataFrame())
+                if fx is None or len(fx) == 0:
+                    raise KeyError(f"Missing FX series {ccy}CHF for cash {name}")
+                fx_close = fx["Close"] if isinstance(fx, pd.DataFrame) and "Close" in fx.columns else fx
+                fx_close = fx_close.astype(float).rename(name)
+                base_close = fx_close if include_fx else pd.Series(1.0, index=fx_close.index, name=name)
 
-        # DECIDE IF LEAVE IN LOCAL CCY (REMOVE FX VOL)
-        #  NOT CASH + fx = true + ccy != chf
-        else: 
-            ticker   = h.get("ticker")
-            px_df = f1.fetch_csv_robust(ticker, params=params)
-            local_s = f1.sort_cols(px_df, ohcl) 
-
-            local_s = deal_with_gbx(local_s)
-        if ccy != 'CHF' and include_fx:
-            fx = fx_map.get(f"{ccy}CHF", pd.Series(dtype=float))
-            fx_aligned = fx.reindex(local_s.index).ffill()
-            # ensure last value available even if FX lags one or two days
-            if fx_aligned.iloc[-1] != fx_aligned.dropna().iloc[-1]:
-                fx_aligned.iloc[-1] = fx_aligned.dropna().iloc[-1]
-
-            # MULTIPLY LOCAL BY FX
-            chf_s = (local_s * fx_aligned).rename(name)
+            close_cols[name] = base_close
+            if ohlc:
+                high_cols[name] = base_close
+                low_cols[name] = base_close
 
         else:
-             # OTHERWISE INCLUDE FX VOL
-            print(f'No FX conversion/vol for {name} ({ccy})')
-            chf_s =local_s.rename(name)
+            # Instrument path
+            ticker = h.get("ticker")
+            px_df = f1.fetch_csv_robust(ticker, params=params)
 
-        # STORE THE LOCAL AND CHF SERIES
-        assets_close_chf_df[name] = chf_s
+            if ohlc:
+                # Use unadjusted OHLC consistently
+                local = f1.sort_cols(px_df, ohlc=True)
+                local_close = local["Close"].astype(float).rename(name)
+                local_high = local["High"].astype(float).rename(name)
+                local_low = local["Low"].astype(float).rename(name)
+                # for return: local close in (inc GBp)
+                local_close_df[name] = px_df["Close"].astype(float).rename(name)             
+                # Pence handling for LSE pence tickers (scale all)
+                local_close = deal_with_gbx(local_close, ccy, gbx)
+                local_high = deal_with_gbx(local_high, ccy, gbx)
+                local_low = deal_with_gbx(local_low, ccy, gbx)
 
+                if include_fx and ccy != "CHF":
+                    fx = fx_map.get(f"{ccy}CHF", pd.DataFrame())
+                    if fx is None or len(fx) == 0:
+                        raise KeyError(f"Missing FX series {ccy}CHF for {name}")
+                    fx_close = fx["Close"] if isinstance(fx, pd.DataFrame) and "Close" in fx.columns else fx
+                    fx_close = fx_close.astype(float)
+                    fx_close_aln = fx_close.reindex(local_close.index).ffill()
 
-    # ALIGN ON COMMON DATES
-    prices_df = assets_close_chf_df.dropna(how="any")   
-    # TRIM
-    prices_df = f2.trim_series(prices_df, params['from'], params['to'])
-    return prices_df
+                    close_cols[name] = (local_close * fx_close_aln).rename(name)
+                    high_cols[name] = (local_high * fx_close_aln).rename(name)
+                    low_cols[name] = (local_low * fx_close_aln).rename(name)
+                else:
+                    close_cols[name] = local_close
+                    high_cols[name] = local_high
+                    low_cols[name] = local_low
+
+            else:
+                # Close-only path: prefer Adjusted Close
+                local_close = f1.pick_close_column(px_df).rename(name).astype(float)
+                local_close = deal_with_gbx(local_close, ccy, gbx)
+                if include_fx and ccy != "CHF":
+                    fx = fx_map.get(f"{ccy}CHF", pd.DataFrame())
+                    if fx is None or len(fx) == 0:
+                        raise KeyError(f"Missing FX series {ccy}CHF for {name}")
+                    fx_close = fx["Close"] if isinstance(fx, pd.DataFrame) and "Close" in fx.columns else fx
+                    fx_close = fx_close.astype(float).reindex(local_close.index).ffill()
+                    close_cols[name] = (local_close * fx_close).rename(name)
+                else:
+                    close_cols[name] = local_close
+
+    # Assemble and align
+    close_df = pd.concat(close_cols.values(), axis=1) if close_cols else pd.DataFrame()
+    close_df.columns = list(close_cols.keys())
+
+    if not ohlc:
+        prices_df = close_df.dropna(how="any")
+        prices_df = trim_series(prices_df, from_dt, to_dt)
+
+        return prices_df
+
+    high_df = pd.concat(high_cols.values(), axis=1) if high_cols else pd.DataFrame(index=close_df.index)
+    high_df.columns = list(high_cols.keys())
+    low_df = pd.concat(low_cols.values(), axis=1) if low_cols else pd.DataFrame(index=close_df.index)
+    low_df.columns = list(low_cols.keys())
+
+    # Inner-align on common dates, then trim
+    common_idx = close_df.index
+    high_df = high_df.reindex(common_idx).dropna(how="any")
+    low_df = low_df.reindex(common_idx).dropna(how="any")
+    close_df = close_df.reindex(common_idx).dropna(how="any")
+
+    high_df = trim_series(high_df, from_dt, to_dt)
+    low_df = trim_series(low_df, from_dt, to_dt)
+    close_df = trim_series(close_df, from_dt, to_dt)
+    
+    return high_df, low_df, close_df, local_close_df

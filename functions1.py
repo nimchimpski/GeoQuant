@@ -116,19 +116,22 @@ def pick_close_column(df: pd.DataFrame) -> pd.Series:
     return pd.to_numeric(s, errors="coerce")
 
 
-def sort_cols(df, ohcl):
+def sort_cols(df, ohlc):
     """Normalize time index and return a float close-like Series.
     """
     if not df.index.is_monotonic_increasing: 
-        print('index wasnt sorted')
+        print('sort_cols: index wasnt sorted')
         df = df.sort_index()
     
     df = df[~df.index.duplicated(keep='last')]
     df = df[df.index.dayofweek < 5] # ?????
     df.index = pd.to_datetime(df.index)
-    if not ohcl:
-        df = pick_close_column(df).astype('float64')
-    return df['Adjusted_close'].astype('float64')
+    if ohlc:
+        return df.astype('float64')
+    else:
+        adjclose_s = pick_close_column(df).astype('float64')
+        return adjclose_s
+
 
 
 def shift_usd_fx_next_day(fx_series: pd.Series) -> pd.Series:
@@ -137,7 +140,7 @@ def shift_usd_fx_next_day(fx_series: pd.Series) -> pd.Series:
     the value at date T comes from T+1. Leaves non-USD series unchanged
     if you choose to guard externally by currency.
     """
-    if not isinstance(fx_series, pd.Series):
-        raise TypeError("fx_series must be a pandas Series")
+    # if not isinstance(fx_series, pd.Series):
+    #     raise TypeError("fx_series must be a pandas Series")
     return fx_series.shift(-1)
 
