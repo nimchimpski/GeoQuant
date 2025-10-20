@@ -166,9 +166,9 @@ def build_returns_matrix_in_chf(
         weights[name] = weight
 
         # JUST FOR THE PRINTING
-        last = assets_close_chf_df[name].iloc[-2]
+        last = assets_close_local_df[name].iloc[-2]
 
-        # print(f"{name}: value {value:.2f} CHF,  last: {last:.2f} * {size}")
+        print(f"{name}: value CHF{value:.2f},  last {last:.2f} *fx* {size}")
 
 
     if not np.isclose(weights.sum(), 1.0, atol=1e-6):

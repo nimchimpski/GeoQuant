@@ -63,7 +63,7 @@ def create_asset_close_chf_s(asset_close_local_s: pd.Series, holding: dict, fx_m
         print('VEU (XWMX proxy) * 0.9 to remove EM element')
     last_asset_close[name] = asset_close_local_s.iloc[-1]
     # DONT CONVERT FOR CHF CASH, OR IF NO_FX FLAG SET, OR IF RISK_FX SET TO 'NONE'
-    if (ccy == "CHF") or no_fx or holding.get('risk_fx', '') == None:
+    if (ccy == "CHF") or no_fx or holding.get('ignore_fx', '') == True:
         print("    Skipping FX conversion for", name)
         asset_close_chf_s = asset_close_local_s.rename(name)
     else:
@@ -107,7 +107,7 @@ def get_holding_value_chf(h: dict, fx_map: dict, assets_close_local_df: pd.DataF
             if ccy == 'CHF':
                 last_local = assets_close_local_df[name].reindex([asof]).iloc[-1]
                 return float(last_local) * position
-            elif h.get('risk_fx', '') == False:
+            elif h.get('ignore_fx', '') != True:
                 # HEDGED IN RISK (KEPT IN LOCAL FOR RETURNS), BUT STILL VALUED IN CHF
                 last_local = assets_close_local_df[name].reindex([asof]).iloc[-1]
                 pair = f"{ccy}CHF"
@@ -120,7 +120,7 @@ def get_holding_value_chf(h: dict, fx_map: dict, assets_close_local_df: pd.DataF
                 return  float(last_local) * float(last_fx) * position
             else:
                 # ALREADY CHF-CONVERTED SERIES (AND ALIGNED) – USE THE AS-OF PRICE
-                # print('    Unhedged in risk, so use CHF series')
+                print('ignroe_fx for', name)
                 return float(assets_close_chf_df[name].reindex([asof]).iloc[-1]) * position
             
 def _log_returns(s: pd.Series) -> pd.Series:
@@ -171,6 +171,7 @@ def get_window_dates(s: pd.Series) -> Tuple[pd.Timestamp, pd.Timestamp]:
     return start_date, end_date
 
 def get_series(ticker, params=config.params, window_start=None, window_end=None) -> pd.Series:
+    print(f'++++ get_series{ticker}')
     s= f1.fetch_csv_robust(params=params, ticker=ticker)
     s = f1.sort_cols(s)
     s = f2.standardize_fx_daily_index(s)
@@ -329,5 +330,5 @@ def base_ccy_assets_px_df(holdings, fx_map, params, ohlc=False):
     high_df = trim_series(high_df, from_dt, to_dt)
     low_df = trim_series(low_df, from_dt, to_dt)
     close_df = trim_series(close_df, from_dt, to_dt)
-    
+
     return high_df, low_df, close_df, local_close_df

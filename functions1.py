@@ -34,8 +34,8 @@ def check_start_date(df, ticker: str, start: str, ) -> None:
     # print('gap days:', gap)
     # if gap != 0:
     #     print('required START:', START,'\ndata start:', earliest)
-    if gap > 5:
-        print(f"WARNING: {ticker} data starts at {earliest}, after global start {start}")
+    # if gap > 5:
+    #     print(f"WARNING: {ticker} data starts at {earliest}, after global start {start}")
 
 def fetch_csv_robust(ticker: str, params: dict=None,  max_age: int = 24) -> pd.DataFrame:
     """
@@ -103,8 +103,8 @@ def pick_close_column(df: pd.DataFrame) -> pd.Series:
             try:
                 a = pd.to_numeric(s, errors="coerce")
                 b = pd.to_numeric(df[colmap["close"]], errors="coerce")
-                if not a.fillna(method="ffill").equals(b.fillna(method="ffill")):
-                    print("note: adjusted_close != close; using adjusted_close")
+                # if not a.ffill().equals(b.ffill()):
+                #     print("note: adjusted_close != close; using adjusted_close")
             except Exception:
                 pass
     elif "adj_close" in colmap:
