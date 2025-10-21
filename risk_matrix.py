@@ -62,12 +62,13 @@ def build_returns_matrix_in_chf(
     if DEBUG:
         print(f">>>FX keys loaded: {list(fx_map.keys())}")
 
+    # ------------BUILD CHF CLOSE SERIES PER ASSET-------------------
     assets_close_local_df = pd.DataFrame()
     assets_close_chf_df = pd.DataFrame()
 
-    # ------------BUILD CHF CLOSE SERIES PER ASSET-------------------
     for h in holdings:
         name = h['name']
+  
         # print(f'>>>>>>>>>>>>>> Processing {name} >>>>>>>>')
         ccy   = h["ccy"].upper()
 
@@ -78,30 +79,31 @@ def build_returns_matrix_in_chf(
             px_df = f1.fetch_csv_robust(ticker, params=params)
             asset_close_local_s = f1.sort_cols(px_df, ohlc)
         # print('asset close local s', asset_close_local_s.iloc[-1])    
-        assets_close_local_df[name] = asset_close_local_s
         ccy = h.get('ccy','').upper()
         # DEAL WITH GBX
         gbx = bool(h.get('gbx', False))
         if gbx and ccy != 'GBP':
             raise ValueError(f"gbx=True only valid for GBP assets, got {name} in {ccy}")
-        series_local = asset_close_local_s / 100.0 if gbx else asset_close_local_s
+        asset_close_local_s = asset_close_local_s / 100.0 if gbx else asset_close_local_s
+        assets_close_local_df[name] = asset_close_local_s
+
         # DECIDE IF TO REMOVE FX VOL IN RETURNS
         include_fx_vol_bool = h.get('include_fx_vol', True)
         if include_fx_vol_bool == False:
             print(f"Removing FX vol for {name} ({ccy}), is this hedged?")
         if ccy == 'CHF' or no_fx or (not include_fx_vol_bool) or h.get('type','').lower()=='cash':
             # print(f'No FX conversion for {name} ({ccy})')
-            asset_close_chf_s = series_local.rename(name)
+            asset_close_chf_s = asset_close_local_s.rename(name)
         else:
             # OTHERWISE INCLUDE FX VOL
             # print(f'Converting {name} from {ccy} to CHF')
             fx = fx_map.get(f"{ccy}CHF", pd.Series(dtype=float))
 
-            fx_aligned = fx.reindex(series_local.index).ffill()
+            fx_aligned = fx.reindex(asset_close_local_s.index).ffill()
             # ensure last value available even if FX lags one or two days
             if fx_aligned.iloc[-1] != fx_aligned.dropna().iloc[-1]:
                 fx_aligned.iloc[-1] = fx_aligned.dropna().iloc[-1]
-            asset_close_chf_s = (series_local * fx_aligned).rename(name)
+            asset_close_chf_s = (asset_close_local_s * fx_aligned).rename(name)
 
             # print(f'CHF close last for {name}: {asset_close_chf_s.iloc[-1]}')
         assets_close_chf_df[name] = asset_close_chf_s
@@ -147,7 +149,9 @@ def build_returns_matrix_in_chf(
     for h in holdings:
         name = h['name']
         size = h.get('position', 0.0)
+
         chf_value = f2.get_holding_value_chf(h, fx_map, assets_close_local_df, assets_close_chf_df, asof)
+  
         # print(f'CHF value {size} of {h["name"]}: {chf_value:.2f}')
         if chf_value is not None:
             chf_values[name] = chf_value

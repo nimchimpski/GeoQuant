@@ -116,9 +116,11 @@ def pick_close_column(df: pd.DataFrame) -> pd.Series:
     return pd.to_numeric(s, errors="coerce")
 
 
-def sort_cols(df, ohlc):
+def sort_cols(df, ohlc=None):
     """Normalize time index and return a float close-like Series.
     """
+    if ohlc is None:
+        print('sort_cols: ohlc not set. True only needd for ATR calculations for vol stops. Defaulting to False')
     if not df.index.is_monotonic_increasing: 
         print('sort_cols: index wasnt sorted')
         df = df.sort_index()

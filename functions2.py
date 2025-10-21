@@ -80,8 +80,8 @@ def create_asset_close_chf_s(asset_close_local_s: pd.Series, holding: dict, fx_m
     
 def get_holding_value_chf(h: dict, fx_map: dict, assets_close_local_df: pd.DataFrame, assets_close_chf_df: pd.DataFrame, asof: str) -> float:
         # print('++++++++in get_holding_value_chf ++++++++')
-        # print(f'Valuing {h["name"]} as of {asof}')
         name = h['name']
+
         typ = h.get('type', '').lower()
         ccy = h.get('ccy', '').upper()
         position = float(h.get('position', 0.0))
@@ -107,9 +107,11 @@ def get_holding_value_chf(h: dict, fx_map: dict, assets_close_local_df: pd.DataF
             if ccy == 'CHF':
                 last_local = assets_close_local_df[name].reindex([asof]).iloc[-1]
                 return float(last_local) * position
-            elif h.get('ignore_fx', '') != True:
+            elif h.get('include_fx_vol', '') != False:
                 # HEDGED IN RISK (KEPT IN LOCAL FOR RETURNS), BUT STILL VALUED IN CHF
                 last_local = assets_close_local_df[name].reindex([asof]).iloc[-1]
+                if name == 'EMIM':
+                    print('asset close chf', name, last_local)
                 pair = f"{ccy}CHF"
                 fx = fx_map.get(pair, pd.Series(dtype=float))
                 if fx.empty:
