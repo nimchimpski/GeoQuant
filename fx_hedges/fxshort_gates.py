@@ -164,7 +164,7 @@ def fxshort_gate(
     slope_exit_threshold: float = 0.0,
     require_carry: bool = False,
     consec_rises_kill: int = 3,
-    shift_for_signal: bool = True,
+    shift_for_signal: bool = False,
     carry_ann: float = 0.04,
     buffer20: float = 0.002,
     grace_days: int = 2,                      
@@ -246,13 +246,13 @@ def fxshort_gate(
 def plot_gate_state(ticker: str, s: pd.Series, gate_stateon: pd.Series) -> None:
     plt.style.use('dark_background')
 
-    TAIL_BARS = 1000
     # Use Mon–Fri only for plotting to avoid weekend prints often present in FX feeds
     # s=s.tail(200)
     s_std_plot = functions2.standardize_fx_daily_index(s)
 
     # Select tail for plotting
-    s_plot = s_std_plot.tail(TAIL_BARS) if TAIL_BARS else s_std_plot
+    # s_plot = s_std_plot.tail(TAIL_BARS) –if TAIL_BARS else s_std_plot
+    s_plot = s_std_plot
     fig, ax = plt.subplots(figsize=(11, 6))
     # Base price plot
     s_plot.plot(ax=ax, color='steelblue', lw=1.2, label=ticker)
@@ -411,9 +411,9 @@ def sweep_fxshort_gate(
     slope_source_vals: Iterable[str] = ("log_price",),  # NEW: sweep source
     debug: bool = False,                        # NEW: optional diagnostics
 ) -> Tuple[pd.DataFrame, pd.Timestamp, pd.Timestamp]:
-    # ...existing code...
+    # print('+++sweep_fxshort_gate')
     s = functions2.standardize_fx_daily_index(price)
-    start_date, end_date = functions2.get_window_dates(s)
+
 
     combos = itertools.product(
         slope_window_vals,
@@ -467,8 +467,7 @@ def sweep_fxshort_gate(
 
         rec = {
             "ticker": ticker,
-            "start_date": start_date,
-            "end_date": end_date,
+
             "slope_window": slope_w,
             "consec": consec,
             "slope_entry_thr": ent_thr,
@@ -485,7 +484,8 @@ def sweep_fxshort_gate(
         records.append(rec)
 
     if not records:
-        return pd.DataFrame(), start_date, end_date  # return triple consistently
+        print("No valid gate configurations found in sweep.")
+        return pd.DataFrame()  # return triple consistently
 
     df = pd.DataFrame(records)
     rk = rank_key
@@ -503,7 +503,7 @@ def sweep_fxshort_gate(
     plot_gate_state(ticker, s, topgate)
 
     df = df.head(1).drop(columns=['gate'])
-    return df, start_date, end_date
+    return df
 
 def summarize_top(df: pd.DataFrame, top: int = 10) -> pd.DataFrame:
     cols = [
