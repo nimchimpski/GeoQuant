@@ -20,7 +20,7 @@ CACHE_DIR.mkdir(exist_ok=True)
 params = {  'from': '2019-5-16', 
             'to': time.strftime("%Y-%m-%d"),
             'api_token': EOD_API,
-            'max_age' : 2,   # hours
+            'max_age' : .0012,   # hours
             'url': 'https://eodhd.com/api/eod/'
             }
 

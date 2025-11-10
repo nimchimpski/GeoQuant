@@ -8,6 +8,7 @@ import importlib
 from dotenv import load_dotenv
 import re
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 import seaborn as sns
 
 from urllib.parse import urlparse
@@ -23,14 +24,13 @@ importlib.reload(books)
 importlib.reload(f2)
 importlib.reload(config)
 
-def build_returns_matrix_in_chf(
+def build_returns_weights(
     holdings: list[dict],
     params: dict = {},
     window_start: str = None,
     window_end: str = None,
     no_fx: bool = False,
     usd_shift: bool = False,
-    DEBUG: bool = False,
     ohlc: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
     """
@@ -48,6 +48,7 @@ def build_returns_matrix_in_chf(
       prices_df: DataFrame of CHF closes, T x N
       weights: Series aligned to columns in rets_df
     """
+    # SORT WINDOW DATES
     if window_end is None:
         window_end = pd.to_datetime(datetime.now().strftime('%Y-%m-%d'))
     else:
@@ -59,8 +60,7 @@ def build_returns_matrix_in_chf(
 
     
     fx_map = f2.make_fx_map(holdings, params, no_fx, usd_shift)
-    if DEBUG:
-        print(f">>>FX keys loaded: {list(fx_map.keys())}")
+
 
     # ------------BUILD CHF CLOSE SERIES PER ASSET-------------------
     assets_close_local_df = pd.DataFrame()
@@ -77,7 +77,42 @@ def build_returns_matrix_in_chf(
         else:
             ticker   = h.get("ticker")
             px_df = f1.fetch_csv_robust(ticker, params=params)
+            print(px_df.tail(20))
             asset_close_local_s = f1.sort_cols(px_df, ohlc)
+
+            # *********** DEBUG PLOTTING ***************
+            sa = asset_close_local_s
+            sx = f2.trim_series(sa, "2025-10-20",)
+            print('px local earliest date', sx.index[0].date())
+            print('px local latest', sx.iloc[-1])
+            print(sx.tail)
+            # CHECK FOR LARGE GAPS IN DATA
+            date_diffs = sx.index.to_series().diff().dt.days.dropna()
+            max_gap = date_diffs.max()
+            print(f'Max data gap (days) for {name}: {max_gap}')
+            r = sx.pct_change()
+            print('r, r*100 ', r.std(), (r*100).std()  )
+
+            # PLOT
+            fig, ax = plt.subplots(figsize=(10,4))
+            ax.plot(sx.index, sx, label=f'{name} local close')
+            # Formatter: month-day only
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
+
+            ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+            plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
+
+            plt.tight_layout()
+
+            plt.title(f'{name} local close price series')
+            plt.xlabel('Date')
+            plt.ylabel('Price')
+            plt.legend()
+            plt.grid()
+            plt.show()
+
+
+
         # print('asset close local s', asset_close_local_s.iloc[-1])    
         ccy = h.get('ccy','').upper()
         # DEAL WITH GBX
@@ -94,6 +129,7 @@ def build_returns_matrix_in_chf(
         if ccy == 'CHF' or no_fx or (not include_fx_vol_bool) or h.get('type','').lower()=='cash':
             # print(f'No FX conversion for {name} ({ccy})')
             asset_close_chf_s = asset_close_local_s.rename(name)
+            print('chf equiv latest', asset_close_chf_s.iloc[-1])
         else:
             # OTHERWISE INCLUDE FX VOL
             # print(f'Converting {name} from {ccy} to CHF')
@@ -108,6 +144,7 @@ def build_returns_matrix_in_chf(
             # print(f'CHF close last for {name}: {asset_close_chf_s.iloc[-1]}')
         assets_close_chf_df[name] = asset_close_chf_s
 
+    # ---------HEDGED CASH---------
     hedged_cash = [
         h['name'] for h in holdings
         if h.get('type','').lower() == 'cash' and h.get('include_fx_vol')
@@ -119,12 +156,6 @@ def build_returns_matrix_in_chf(
 
     # ALIGN ON COMMON DATES AND RESTRICT TO LOOKBACK WINDOW
     prices_df = assets_close_chf_df.dropna(how="any")   
-
-    if DEBUG and not prices_df.empty:
-        print(
-            f">>>Common window: {prices_df.index.min().date()} → {prices_df.index.max().date()} "
-            f"({len(prices_df)} rows before tail)"
-        )
     
     prices_df = f2.trim_series(prices_df, window_start, window_end)
     rets_df = np.log(prices_df / prices_df.shift(1)).dropna()
@@ -186,6 +217,7 @@ def portfolio_risk(rets_df: pd.DataFrame, weights: pd.Series) -> dict:
     Compute annualized vols, correlation, covariance, portfolio vol,
     marginal risk contribution (MRC), and percent risk contribution (PRC).
     """
+    print('++++++ portfolio_risk()')
     # Annualized stats
     cov_daily = rets_df.cov()
     cov_annual = cov_daily * 252.0

@@ -49,6 +49,7 @@ def create_asset_close_chf_s(asset_close_local_s: pd.Series, holding: dict, fx_m
     take the holding local series and return a chf series
     this is for risk calc, so ERNS should not have FX applied, otherwise its takes on currency vol - really
     '''
+    print('+++Create_asset_close_chf', holding["name"])
     name = holding["name"]
     ccy = holding["ccy"].upper()
     chf_close_s = pd.Series()
@@ -63,7 +64,7 @@ def create_asset_close_chf_s(asset_close_local_s: pd.Series, holding: dict, fx_m
         print('VEU (XWMX proxy) * 0.9 to remove EM element')
     last_asset_close[name] = asset_close_local_s.iloc[-1]
     # DONT CONVERT FOR CHF CASH, OR IF NO_FX FLAG SET, OR IF RISK_FX SET TO 'NONE'
-    if (ccy == "CHF") or no_fx or holding.get('ignore_fx', '') == True:
+    if (ccy == "CHF") or no_fx or holding.get('include_fx_vol', '') == True:
         print("    Skipping FX conversion for", name)
         asset_close_chf_s = asset_close_local_s.rename(name)
     else:
