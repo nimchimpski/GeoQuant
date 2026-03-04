@@ -12,7 +12,7 @@ computershare = [
 IBKR_live = [
     # CORE
     # {"name":"VEU",     "ticker":"VEU.US", "ccy":"USD", "GBP_exposure": 0.13,"gbx":False, "include_fx_vol":True, "position": 111,},
-    {"name":"XMWX",     "ticker":"XMWX.LSE", "ccy":"GBP", "GBP_exposure": 0.13,"gbx":False, "include_fx_vol":True, "position": 324},
+    {"name":"XMWX",     "ticker":"XMWX.LSE", "ccy":"GBP", "GBP_exposure": 0.13,"gbx":False, "include_fx_vol":True, "position": 244},
     {"name":"EMIM",     "ticker":"EMIM.LSE", "ccy":"GBP", "gbx":True, "position": 62},
     {"name":"VUAG",     "ticker":"VUAG.LSE", "ccy":"GBP","USD_exposure": 1.0 , "gbx":False, "position": 23},
 
@@ -31,9 +31,9 @@ IBKR_live = [
     # {"name": "INRG", "ticker": "INRG.LSE", "ccy": "GBP", "USD_exposure": .33, "GBP_exposure": .05, "gbx":True, "position": 290},
     {"name": "NOVN", "ticker": "NOVN.SW", "ccy": "CHF", "USD_exposure": 0, "GBP_exposure": .0, "gbx":False, "position": 19},
     # {"name": "CASH_CHF", "ticker": "", "type": "cash", "ccy": "CHF", "amount": 7717}, # leave out 10k savings?
-    {"name": "CASH_GBP","ticker": "GBPCHF.FOREX", "type": "cash", "ccy": "GBP", "amount": -1500, "include_fx_vol": True },
+    # {"name": "CASH_GBP","ticker": "GBPCHF.FOREX", "type": "cash", "ccy": "GBP", "amount": -1500, "include_fx_vol": True },
     # {"name": "CASH_USD","ticker": "USDCHF.FOREX", "type": "cash", "ccy": "USD", "amount": 0},
-    {"name": "CASH_JPY","ticker": "JPYCHF.FOREX", "type": "cash", "ccy": "JPY", "amount": -809058},
+    {"name": "CASH_JPY","ticker": "JPYCHF.FOREX", "type": "cash", "ccy": "JPY", "amount": -155314},
 ]
 IBKR_live_adj = [
     # CORE
