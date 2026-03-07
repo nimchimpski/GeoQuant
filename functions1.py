@@ -207,6 +207,34 @@ def fetch_csv_robust(ticker: str, params: dict=None) -> pd.DataFrame:
     os.replace(tmp, path)
     return df_to_save
 
+# def pick_close_column(df: pd.DataFrame) -> pd.Series:
+#     """Pick the most appropriate close-like column.
+#     Prefer adjusted_close when present; else fall back to close. Case-insensitive.
+#     Returns a float Series.
+#     """
+#     if df is None or df.empty:
+#         raise ValueError("Empty DataFrame passed to pick_close_column")
+#     colmap = {c.lower(): c for c in df.columns}
+#     s = None
+#     if "adjusted_close" in colmap:
+#         s = df[colmap["adjusted_close"]]
+#         # If close also present and differs, keep adjusted_close but note it
+#         if "close" in colmap:
+#             try:
+#                 a = pd.to_numeric(s, errors="coerce")
+#                 b = pd.to_numeric(df[colmap["close"]], errors="coerce")
+#                 # if not a.ffill().equals(b.ffill()):
+#                 #     print("note: adjusted_close != close; using adjusted_close")
+#             except Exception:
+#                 pass
+#     elif "adj_close" in colmap:
+#         s = df[colmap["adj_close"]]
+#     elif "close" in colmap:
+#         s = df[colmap["close"]]
+#     else:
+#         raise ValueError("DataFrame does not contain 'adjusted_close' or 'close' column.")
+#     return pd.to_numeric(s, errors="coerce")
+
 def pick_close_column(df: pd.DataFrame) -> pd.Series:
     """Pick the most appropriate close-like column.
     Prefer adjusted_close when present; else fall back to close. Case-insensitive.
@@ -215,24 +243,9 @@ def pick_close_column(df: pd.DataFrame) -> pd.Series:
     if df is None or df.empty:
         raise ValueError("Empty DataFrame passed to pick_close_column")
     colmap = {c.lower(): c for c in df.columns}
-    s = None
-    if "adjusted_close" in colmap:
-        s = df[colmap["adjusted_close"]]
-        # If close also present and differs, keep adjusted_close but note it
-        if "close" in colmap:
-            try:
-                a = pd.to_numeric(s, errors="coerce")
-                b = pd.to_numeric(df[colmap["close"]], errors="coerce")
-                # if not a.ffill().equals(b.ffill()):
-                #     print("note: adjusted_close != close; using adjusted_close")
-            except Exception:
-                pass
-    elif "adj_close" in colmap:
-        s = df[colmap["adj_close"]]
-    elif "close" in colmap:
-        s = df[colmap["close"]]
-    else:
-        raise ValueError("DataFrame does not contain 'adjusted_close' or 'close' column.")
+
+    s = df[colmap["close"]]
+
     return pd.to_numeric(s, errors="coerce")
 
 
@@ -240,7 +253,7 @@ def sort_cols(df, ohlc=None):
     """Normalize time index and return a float close-like Series.
     """
     if ohlc is None:
-        print('sort_cols: ohlc not set. True only needd for ATR calculations for vol stops. Defaulting to False')
+        print('sort_cols: ohlc not set. True only needed for ATR calculations for vol stops. Defaulting to False')
     if not df.index.is_monotonic_increasing: 
         print('sort_cols: index wasnt sorted')
         df = df.sort_index()

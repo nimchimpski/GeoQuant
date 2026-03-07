@@ -17,7 +17,7 @@ CACHE_DIR = PROJECT_ROOT / "cache"
 CACHE_DIR.mkdir(exist_ok=True)
 
 # DATA DOWNLOAD PARAMS
-params = {  'from': '2019-5-16', 
+params = {  'from': '2016-01-01', 
             'to': time.strftime("%Y-%m-%d"),
             'api_token': EOD_API,
             'max_age' : 12,   # hours
