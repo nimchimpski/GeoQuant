@@ -1,8 +1,11 @@
-START : '2020-01-01'  # global start date for all fetches
+START : '2018-01-01'  # global start date for all fetches
 DEBUG : True
+# URL : f'https://eodhd.com/api/eod/'
+URL : "https://stooq.com/q/d/l/?s=ulvr.uk&d1=20180101&d2=20260307&i=d"
+
 params : {  'from': START, 
             'to': today,
             'api_token': EOD_API    }
-url : f'https://eodhd.com/api/eod/'
+url : URL
 MAX_AGE : 24
 today : time.strftime("%Y-%m-%d")

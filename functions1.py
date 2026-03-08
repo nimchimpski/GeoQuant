@@ -28,14 +28,11 @@ def looks_like_json(payload: bytes) -> bool:
 
 def check_start_date(df, ticker: str, start: str, ) -> None:
     earliest = df.index.min().date()
-    # print('data start date:', earliest)
-    # print('required START:', START)
     gap = (earliest - pd.to_datetime(start).date()).days
-    # print('gap days:', gap)
-    # if gap != 0:
-    #     print('required START:', START,'\ndata start:', earliest)
-    # if gap > 5:
-    #     print(f"WARNING: {ticker} data starts at {earliest}, after global start {start}")
+    print('gap days:', gap)
+    if gap != 0:
+        print('required start:', start,'\ndata start:', earliest)
+
 
 def _normalize_ohlc_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Return a copy with canonical OHLC column names: Open, High, Low, Close, Adjusted_close (when present).
@@ -145,7 +142,22 @@ def clean_ohlc_flatbar_spikes(df: pd.DataFrame, *, ret_spike: float = 0.10, eps:
     changes = [(dt, float(old), float(cleaned.loc[dt, "Close"])) for (dt, old) in changes]
     return cleaned, changes
 
-def fetch_csv_robust(ticker: str, params: dict=None) -> pd.DataFrame:
+def build_url(datasource: str, ticker: str, params: dict) -> str:
+    start = params['start']
+    end = params['end']
+    if datasource == 'stooq':
+        # remove '-' from start and end date formatting'
+        start = start.replace('-', '')
+        end = end.replace('-', '')
+
+        url = f"https://stooq.com/q/d/l/?s={ticker}&d1={start}&d2={end}&i=d"
+    elif datasource == 'eodhd':
+        url = f'https://eodhd.com/api/eod/{ticker}?api_token={params["api_token"]}&from={start}&to={end}'
+    else:
+        raise ValueError(f"Unsupported datasource: {datasource}")
+    return url
+
+# def fetch_csv_robust1(ticker: str, params: dict=None) -> pd.DataFrame:
     """
         Robust CSV fetch with:
       - on-disk cache (TTL),
@@ -153,9 +165,11 @@ def fetch_csv_robust(ticker: str, params: dict=None) -> pd.DataFrame:
       - atomic write on success.
         Returns a parsed DataFrame (index on first column).
         """
-    START = params['from']
-    url = params['url']
-    url = f'{url}{ticker}'
+    # start = params['from']
+    start = params['from']
+    datasource = params['datasource']
+    url = build_url(datasource)
+    # url = f'{url}{ticker}'
     max_age = params['max_age']
     
 
@@ -166,7 +180,7 @@ def fetch_csv_robust(ticker: str, params: dict=None) -> pd.DataFrame:
     if is_fresh(path, max_age):
         # print(f"{ticker} - using cached data")
         df = pd.read_csv(path, header=0, parse_dates=[0], index_col=0).sort_index()
-        check_start_date(df, ticker, START)
+        check_start_date(df, ticker, start)
 
         return df
     print(f"{ticker} - downloading fresh data")
@@ -187,7 +201,7 @@ def fetch_csv_robust(ticker: str, params: dict=None) -> pd.DataFrame:
 
     # Parse CSV and normalize
     df = pd.read_csv(io.BytesIO(raw), header=0, parse_dates=[0], index_col=0).sort_index()
-    check_start_date(df, ticker, START)
+    check_start_date(df, ticker, start)
     # Optional cleaning on fresh download
     do_clean = True
     if do_clean:
@@ -207,33 +221,102 @@ def fetch_csv_robust(ticker: str, params: dict=None) -> pd.DataFrame:
     os.replace(tmp, path)
     return df_to_save
 
-# def pick_close_column(df: pd.DataFrame) -> pd.Series:
-#     """Pick the most appropriate close-like column.
-#     Prefer adjusted_close when present; else fall back to close. Case-insensitive.
-#     Returns a float Series.
-#     """
-#     if df is None or df.empty:
-#         raise ValueError("Empty DataFrame passed to pick_close_column")
-#     colmap = {c.lower(): c for c in df.columns}
-#     s = None
-#     if "adjusted_close" in colmap:
-#         s = df[colmap["adjusted_close"]]
-#         # If close also present and differs, keep adjusted_close but note it
-#         if "close" in colmap:
-#             try:
-#                 a = pd.to_numeric(s, errors="coerce")
-#                 b = pd.to_numeric(df[colmap["close"]], errors="coerce")
-#                 # if not a.ffill().equals(b.ffill()):
-#                 #     print("note: adjusted_close != close; using adjusted_close")
-#             except Exception:
-#                 pass
-#     elif "adj_close" in colmap:
-#         s = df[colmap["adj_close"]]
-#     elif "close" in colmap:
-#         s = df[colmap["close"]]
-#     else:
-#         raise ValueError("DataFrame does not contain 'adjusted_close' or 'close' column.")
-#     return pd.to_numeric(s, errors="coerce")
+def url_builder(datasource: str, ticker: str, params: dict) -> str:
+    start = params['start']
+    start = pd.to_datetime(start).strftime('%Y%m%d')
+    end = params['end']
+    end = pd.to_datetime(end).strftime('%Y%m%d')
+    if datasource == 'stooq':
+        url = f"https://stooq.com/q/d/l/?s={ticker}&d1={start}&d2={end}&i=d"
+    elif datasource == 'eodhd':
+        url = f'https://eodhd.com/api/eod/{ticker}?api_token={params["api_token"]}&from={start}&to={end}'
+    else:
+        raise ValueError(f"Unsupported datasource: {datasource}")
+    return url
+
+def fetch_csv_robust(ticker: str, params: dict=None) -> pd.DataFrame:
+    """
+        Robust CSV fetch with:
+      - on-disk cache (TTL),
+      - JSON throttle/error detection (does NOT overwrite cache),
+      - atomic write on success.
+        Returns a parsed DataFrame (index on first column).
+        """
+    # start = params['from']
+    start = params['start']
+    datasource = params['datasource']
+    url = url_builder(datasource, ticker, params)
+
+    # url = f'{url}{ticker}'
+    max_age = params['max_age']
+    
+
+    # print(f'params: {params}')
+    path = cache_path( ticker)
+
+    # if cache is fresh return it (optionally post-clean)
+    if is_fresh(path, max_age):
+        # print(f"{ticker} - using cached data")
+        df = pd.read_csv(path, header=0, parse_dates=[0], index_col=0).sort_index()
+
+        check_start_date(df, ticker, start)
+        return df
+
+    print(f"{ticker} - downloading fresh data")
+
+    # GET THE DATA
+    resp = requests.get(url)
+    resp.raise_for_status()
+    #  EXAMINE RAW BYTES TO SEE IF THERE IS A PROBLEM
+    raw = resp.content
+
+    # Detect JSON throttle/error; do not poison cache
+    if looks_like_json(raw):
+        # Try to show a concise message
+        try:
+            msg = json.loads(raw.decode("utf-8", errors="ignore"))
+        except Exception:
+            msg = {"body_head": raw[:200].decode("utf-8", errors="ignore")}
+        raise RuntimeError(f"... returned JSON (throttle/error) for :{ticker} -> {str(msg)[:180]}")
+    
+    # PAYLOAD CHECKS
+    if not raw or len(raw) < 20:
+        raise ValueError(f"{ticker}: empty/tiny payload")
+    head = raw[:200].lstrip().lower()
+    if b"<html" in head:
+        raise ValueError(f"{ticker}: got HTML page, not CSV")
+
+    # TURN THE RAW BYTES INTO A DATAFRAME
+    try:
+        df = pd.read_csv(io.BytesIO(raw), header=0, parse_dates=[0], index_col=0).sort_index()
+    except Exception as e:
+        raise ValueError(f"{ticker}: failed to parse CSV -> {e}")
+    df.index = pd.to_datetime(df.index, errors="coerce")
+    df = df.sort_index()
+
+    # df['Date'] = pd.to_datetime(df['Date'])
+    # df = df.sort_values('Date').set_index('Date')
+
+    check_start_date(df, ticker, start)
+    # Optional cleaning on fresh download
+    do_clean = True
+    if do_clean:
+        cleaned, changes = clean_ohlc_flatbar_spikes(
+            df,
+            ret_spike = 0.10,
+        )
+        if changes:
+            print(f"{ticker} - cleaned {len(changes)} flat-bar spike(s) on download")
+        df_to_save = cleaned
+    else:
+        df_to_save = df
+    # print('data start date b4 saving:', df_to_save.index.min().date())
+    # ATOMIC-ISH WRITE: SAVE THE (POSSIBLY CLEANED) CSV
+    tmp = path.with_suffix(".tmp")
+    # TURN DF INTO CSV FOR SAVING
+    df_to_save.to_csv(tmp, date_format="%Y-%m-%d")
+    os.replace(tmp, path)
+    return df_to_save
 
 def pick_close_column(df: pd.DataFrame) -> pd.Series:
     """Pick the most appropriate close-like column.

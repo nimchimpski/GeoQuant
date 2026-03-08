@@ -13,6 +13,7 @@ from config import *
 import functions1 as f1
 import functions2 as f2
 import config
+from config import params
 
 def make_fx_map(holdings, params, usd_shift=True, ohlc=False) -> dict[str, pd.Series]   :
     # Pre-fetch FX once per currency (excluding CHF)
@@ -173,14 +174,21 @@ def get_window_dates(s: pd.Series) -> Tuple[pd.Timestamp, pd.Timestamp]:
     start_date = s.index[1]
     return start_date, end_date
 
-def get_series(ticker, params=config.params, window_start=None, window_end=None) -> pd.Series:
+# def get_series1(ticker, params=config.params, window_start=None, window_end=None) -> pd.Series:
+#     print(f'++++ get_series{ticker}')
+#     s= f1.fetch_csv_robust(params=params, ticker=ticker)
+#     s = f1.sort_cols(s)
+#     s = f2.standardize_fx_daily_index(s)
+#     s = trim_series(s, window_start, window_end)
+#     return s
+
+def get_series(ticker, window_start=None, window_end=None) -> pd.Series:
     print(f'++++ get_series{ticker}')
-    s= f1.fetch_csv_robust(params=params, ticker=ticker)
+    s= f1.fetch_csv_robust(ticker=ticker, params=params)
     s = f1.sort_cols(s)
     s = f2.standardize_fx_daily_index(s)
     s = trim_series(s, window_start, window_end)
     return s
-
 
 def plotter(ticker, prices, gate_stateon=None, TAIL_BARS=1000,):
     plt.style.use('dark_background')   
