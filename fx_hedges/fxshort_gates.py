@@ -1,13 +1,8 @@
 import numpy as np
 import pandas as pd
-from scipy import stats
-from typing import Tuple, Dict
-from dotenv import load_dotenv
+from typing import Callable, Iterable, Tuple
 import matplotlib.pyplot as plt
-import itertools, math
-from urllib.parse import urlparse
-from datetime import datetime, timedelta
-from typing import Tuple, Dict, Iterable, Callable
+import itertools
 
 import functions2
 
