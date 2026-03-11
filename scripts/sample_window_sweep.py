@@ -9,6 +9,7 @@ import subprocess
 from typing import Iterable
 
 import pandas as pd
+import numpy as np
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,29 @@ class SweepConfig:
     min_months: int = 6
     roll_start_step_months: int | None = None
     frequency: str = "1M"
+
+
+def ols_slope_logprice(series: pd.Series) -> float:
+    """Compute OLS slope of log-price against centered time index."""
+    y = np.log(pd.Series(series).astype(float).values)
+    if len(y) < 3:
+        return np.nan
+    x = np.arange(len(y), dtype=float)
+    x = x - x.mean()
+    y = y - y.mean()
+    denom = np.dot(x, x)
+    if denom == 0:
+        return np.nan
+    return float(np.dot(x, y) / denom)
+
+
+def minmax_normalize(series: pd.Series) -> pd.Series:
+    """Min-max normalize a series; return all-ones when degenerate."""
+    s = pd.Series(series)
+    lo, hi = s.min(), s.max()
+    if pd.isna(lo) or pd.isna(hi) or hi == lo:
+        return pd.Series(np.ones(len(s)), index=s.index)
+    return (s - lo) / (hi - lo)
 
 
 def expanding_month_windows(index: pd.DatetimeIndex, min_months: int = 6) -> list[tuple[pd.Timestamp, pd.Timestamp, int]]:

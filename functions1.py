@@ -2,9 +2,11 @@ import io
 import os
 import time
 import json
+import hashlib
 import pathlib
 import requests
 import pandas as pd
+from datetime import datetime, timezone, timedelta
 from config import *
 import functions2 as f2
 
@@ -143,19 +145,170 @@ def clean_ohlc_flatbar_spikes(df: pd.DataFrame, *, ret_spike: float = 0.10, eps:
     return cleaned, changes
 
 def build_url(datasource: str, ticker: str, params: dict) -> str:
-    start = params['start']
-    end = params['end']
+    start = pd.to_datetime(params['start']).strftime('%Y%m%d')
+    end = pd.to_datetime(params['end']).strftime('%Y%m%d')
     if datasource == 'stooq':
-        # remove '-' from start and end date formatting'
-        start = start.replace('-', '')
-        end = end.replace('-', '')
-
         url = f"https://stooq.com/q/d/l/?s={ticker}&d1={start}&d2={end}&i=d"
     elif datasource == 'eodhd':
         url = f'https://eodhd.com/api/eod/{ticker}?api_token={params["api_token"]}&from={start}&to={end}'
     else:
         raise ValueError(f"Unsupported datasource: {datasource}")
     return url
+
+
+def build_runtime_config(
+    base_params: dict,
+    *,
+    run_mode: str,
+    ticker: str,
+    window_start: str,
+    window_end: str | None = None,
+    max_age_research: float = 22.0,
+    max_age_production: float = 0.0,
+) -> tuple[dict, dict]:
+    """Build explicit runtime params and deterministic run metadata."""
+    if run_mode not in {"research", "production"}:
+        raise ValueError("run_mode must be 'research' or 'production'")
+
+    max_age = max_age_research if run_mode == "research" else max_age_production
+    force_refresh = run_mode == "production"
+
+    runtime_params = dict(base_params)
+    runtime_params["max_age"] = float(max_age)
+    runtime_params["start"] = window_start
+    if window_end is not None:
+        runtime_params["end"] = window_end
+
+    run_meta = {
+        "run_mode": run_mode,
+        "ticker": ticker,
+        "window_start": window_start,
+        "window_end": window_end,
+        "max_age": float(max_age),
+        "force_refresh": force_refresh,
+        "created_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    run_meta["run_id"] = hashlib.sha1(
+        json.dumps(run_meta, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:12]
+
+    return runtime_params, run_meta
+
+
+def cache_meta_path(ticker: str) -> pathlib.Path:
+    """Sidecar metadata file used to track refresh cadence for each cached ticker."""
+    return cache_path(ticker).with_suffix(".meta.json")
+
+
+def print_cache_status(ticker: str) -> dict:
+    """Print a compact cache status banner and return parsed fields."""
+    meta_path = cache_meta_path(ticker)
+    if not meta_path.exists():
+        print("CACHE STATUS [MISSING]", ticker)
+        print("no cache sidecar metadata found for", ticker)
+        return {
+            "status": "MISSING",
+            "mode": None,
+            "last_update_utc": None,
+            "last_full_refresh_utc": None,
+            "meta_path": str(meta_path),
+        }
+
+    meta = _read_cache_meta(ticker)
+    mode = str(meta.get("last_update_mode") or "unknown")
+    last_update = meta.get("last_update_utc")
+    last_full = meta.get("last_full_refresh_utc")
+
+    if mode == "full":
+        status = "OK"
+    elif mode in {"incremental", "incremental_noop"}:
+        status = "WARN"
+    else:
+        status = "UNKNOWN"
+
+    print(f"CACHE STATUS [{status}] {ticker}")
+    print("cache meta path:", meta_path)
+    print("last_update_mode:", mode)
+    print("last_update_utc:", last_update)
+    print("last_full_refresh_utc:", last_full)
+
+    return {
+        "status": status,
+        "mode": mode,
+        "last_update_utc": last_update,
+        "last_full_refresh_utc": last_full,
+        "meta_path": str(meta_path),
+    }
+
+
+def _read_cache_meta(ticker: str) -> dict:
+    p = cache_meta_path(ticker)
+    if not p.exists():
+        return {}
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _write_cache_meta(ticker: str, meta: dict) -> None:
+    p = cache_meta_path(ticker)
+    tmp = p.with_suffix(".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2, sort_keys=True)
+    os.replace(tmp, p)
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _parse_iso_utc(ts: str | None) -> datetime | None:
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _is_monthly_full_refresh_due(meta: dict, interval_days: int = 30) -> bool:
+    last = _parse_iso_utc(meta.get("last_full_refresh_utc"))
+    if last is None:
+        return True
+    return (datetime.now(timezone.utc) - last) >= timedelta(days=interval_days)
+
+
+def _download_csv_frame(url: str, ticker: str) -> pd.DataFrame:
+    """Download and parse CSV payload from provider endpoint."""
+    resp = requests.get(url)
+    resp.raise_for_status()
+    raw = resp.content
+
+    if looks_like_json(raw):
+        try:
+            msg = json.loads(raw.decode("utf-8", errors="ignore"))
+        except Exception:
+            msg = {"body_head": raw[:200].decode("utf-8", errors="ignore")}
+        raise RuntimeError(f"... returned JSON (throttle/error) for :{ticker} -> {str(msg)[:180]}")
+
+    if not raw or len(raw) < 20:
+        raise ValueError(f"{ticker}: empty/tiny payload")
+
+    head = raw[:200].lstrip().lower()
+    if b"<html" in head:
+        raise ValueError(f"{ticker}: got HTML page, not CSV")
+
+    try:
+        df = pd.read_csv(io.BytesIO(raw), header=0, parse_dates=[0], index_col=0).sort_index()
+    except Exception as e:
+        raise ValueError(f"{ticker}: failed to parse CSV -> {e}")
+
+    df.index = pd.to_datetime(df.index, errors="coerce")
+    df = df[~df.index.isna()].sort_index()
+    return df
 
 # def fetch_csv_robust1(ticker: str, params: dict=None) -> pd.DataFrame:
     """
@@ -222,19 +375,10 @@ def build_url(datasource: str, ticker: str, params: dict) -> str:
     return df_to_save
 
 def url_builder(datasource: str, ticker: str, params: dict) -> str:
-    start = params['start']
-    start = pd.to_datetime(start).strftime('%Y%m%d')
-    end = params['end']
-    end = pd.to_datetime(end).strftime('%Y%m%d')
-    if datasource == 'stooq':
-        url = f"https://stooq.com/q/d/l/?s={ticker}&d1={start}&d2={end}&i=d"
-    elif datasource == 'eodhd':
-        url = f'https://eodhd.com/api/eod/{ticker}?api_token={params["api_token"]}&from={start}&to={end}'
-    else:
-        raise ValueError(f"Unsupported datasource: {datasource}")
-    return url
+    # Backward-compatible wrapper; keep callers stable while using one implementation.
+    return build_url(datasource, ticker, params)
 
-def fetch_csv_robust(ticker: str, params: dict=None) -> pd.DataFrame:
+def fetch_csv_robust(ticker: str, params: dict=None, force_refresh: bool = False) -> pd.DataFrame:
     """
         Robust CSV fetch with:
       - on-disk cache (TTL),
@@ -242,80 +386,96 @@ def fetch_csv_robust(ticker: str, params: dict=None) -> pd.DataFrame:
       - atomic write on success.
         Returns a parsed DataFrame (index on first column).
         """
-    # start = params['from']
     start = params['start']
     datasource = params['datasource']
-    url = url_builder(datasource, ticker, params)
-
-    # url = f'{url}{ticker}'
     max_age = params['max_age']
-    
+    end = params.get('end', datetime.now(timezone.utc).strftime('%Y%m%d'))
 
-    # print(f'params: {params}')
-    path = cache_path( ticker)
+    path = cache_path(ticker)
+    meta = _read_cache_meta(ticker)
+    monthly_full_due = _is_monthly_full_refresh_due(meta, interval_days=30)
+    need_full_refresh = force_refresh or (not path.exists()) or monthly_full_due
 
-    # if cache is fresh return it (optionally post-clean)
-    if is_fresh(path, max_age):
-        # print(f"{ticker} - using cached data")
-        df = pd.read_csv(path, header=0, parse_dates=[0], index_col=0).sort_index()
+    if force_refresh and path.exists():
+        print(f"{ticker} - force_refresh=True, bypassing cache")
 
-        check_start_date(df, ticker, start)
-        return df
+    # Fast path: fresh cache and no mandatory full refresh.
+    if (not need_full_refresh) and is_fresh(path, max_age):
+        print(f"{ticker} - using cached data")
+        df_cached = pd.read_csv(path, header=0, parse_dates=[0], index_col=0).sort_index()
+        check_start_date(df_cached, ticker, start)
+        return df_cached
 
-    print(f"{ticker} - downloading fresh data")
-
-    # GET THE DATA
-    resp = requests.get(url)
-    resp.raise_for_status()
-    #  EXAMINE RAW BYTES TO SEE IF THERE IS A PROBLEM
-    raw = resp.content
-
-    # Detect JSON throttle/error; do not poison cache
-    if looks_like_json(raw):
-        # Try to show a concise message
-        try:
-            msg = json.loads(raw.decode("utf-8", errors="ignore"))
-        except Exception:
-            msg = {"body_head": raw[:200].decode("utf-8", errors="ignore")}
-        raise RuntimeError(f"... returned JSON (throttle/error) for :{ticker} -> {str(msg)[:180]}")
-    
-    # PAYLOAD CHECKS
-    if not raw or len(raw) < 20:
-        raise ValueError(f"{ticker}: empty/tiny payload")
-    head = raw[:200].lstrip().lower()
-    if b"<html" in head:
-        raise ValueError(f"{ticker}: got HTML page, not CSV")
-
-    # TURN THE RAW BYTES INTO A DATAFRAME
-    try:
-        df = pd.read_csv(io.BytesIO(raw), header=0, parse_dates=[0], index_col=0).sort_index()
-    except Exception as e:
-        raise ValueError(f"{ticker}: failed to parse CSV -> {e}")
-    df.index = pd.to_datetime(df.index, errors="coerce")
-    df = df.sort_index()
-
-    # df['Date'] = pd.to_datetime(df['Date'])
-    # df = df.sort_values('Date').set_index('Date')
-
-    check_start_date(df, ticker, start)
-    # Optional cleaning on fresh download
-    do_clean = True
-    if do_clean:
-        cleaned, changes = clean_ohlc_flatbar_spikes(
-            df,
-            ret_spike = 0.10,
-        )
-        if changes:
-            print(f"{ticker} - cleaned {len(changes)} flat-bar spike(s) on download")
-        df_to_save = cleaned
+    # Decide between full refresh and incremental merge.
+    if need_full_refresh:
+        params_full = dict(params)
+        params_full['start'] = start
+        params_full['end'] = end
+        print(f"{ticker} - monthly/forced full refresh")
+        df_raw = _download_csv_frame(build_url(datasource, ticker, params_full), ticker)
+        mode = 'full'
     else:
-        df_to_save = df
-    # print('data start date b4 saving:', df_to_save.index.min().date())
-    # ATOMIC-ISH WRITE: SAVE THE (POSSIBLY CLEANED) CSV
+        # Incremental update: fetch from day after cached max date to current end.
+        df_cached = pd.read_csv(path, header=0, parse_dates=[0], index_col=0).sort_index()
+        if df_cached.empty:
+            params_full = dict(params)
+            params_full['start'] = start
+            params_full['end'] = end
+            print(f"{ticker} - cache empty, fallback full refresh")
+            df_raw = _download_csv_frame(build_url(datasource, ticker, params_full), ticker)
+            mode = 'full'
+        else:
+            last_cached = pd.to_datetime(df_cached.index.max())
+            inc_start_dt = (last_cached + pd.Timedelta(days=1)).date()
+            inc_end_dt = pd.to_datetime(end).date()
+
+            if inc_start_dt > inc_end_dt:
+                print(f"{ticker} - no new dates to fetch; serving cache")
+                check_start_date(df_cached, ticker, start)
+                return df_cached
+
+            params_inc = dict(params)
+            params_inc['start'] = str(inc_start_dt)
+            params_inc['end'] = str(inc_end_dt)
+            print(f"{ticker} - incremental update {params_inc['start']} -> {params_inc['end']}")
+            try:
+                df_inc = _download_csv_frame(build_url(datasource, ticker, params_inc), ticker)
+            except ValueError as exc:
+                # Some providers return empty payloads for same-day requests before EOD print.
+                if 'empty/tiny payload' in str(exc):
+                    print(f"{ticker} - incremental fetch returned no rows; serving cache")
+                    now_iso = _utc_now_iso()
+                    meta['last_update_utc'] = now_iso
+                    meta['last_update_mode'] = 'incremental_noop'
+                    _write_cache_meta(ticker, meta)
+                    check_start_date(df_cached, ticker, start)
+                    return df_cached
+                raise
+
+            df_raw = pd.concat([df_cached, df_inc], axis=0)
+            df_raw = df_raw[~df_raw.index.duplicated(keep='last')].sort_index()
+            mode = 'incremental'
+
+    check_start_date(df_raw, ticker, start)
+
+    cleaned, changes = clean_ohlc_flatbar_spikes(df_raw, ret_spike=0.10)
+    if changes:
+        print(f"{ticker} - cleaned {len(changes)} flat-bar spike(s) on {mode} update")
+    df_to_save = cleaned
+
+    # Atomic write of merged frame.
     tmp = path.with_suffix(".tmp")
-    # TURN DF INTO CSV FOR SAVING
     df_to_save.to_csv(tmp, date_format="%Y-%m-%d")
     os.replace(tmp, path)
+
+    # Persist refresh metadata for monthly full-refresh policy.
+    now_iso = _utc_now_iso()
+    meta['last_update_utc'] = now_iso
+    meta['last_update_mode'] = mode
+    if mode == 'full':
+        meta['last_full_refresh_utc'] = now_iso
+    _write_cache_meta(ticker, meta)
+
     return df_to_save
 
 def pick_close_column(df: pd.DataFrame) -> pd.Series:

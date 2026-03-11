@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 from typing import Callable, Iterable, Tuple
-import matplotlib.pyplot as plt
 import itertools
 
 import functions2
@@ -27,6 +26,8 @@ def wave_rider(
     returns: pd.Series | None = None,
     avg_rise_window: int | None = None,
     avg_rise_threshold: float | None = None,
+    rise_kill_pct: float | None = None,
+    rise_kill_window: int | None = None,
  ) -> pd.Series:
 
     # print('wave_rider')
@@ -36,8 +37,20 @@ def wave_rider(
     no_reconf = 0
     rises_run = 0
     rmean = None
+    rise_pct_roll = None
     if returns is not None and avg_rise_window is not None and avg_rise_window > 0:
         rmean = returns.rolling(avg_rise_window, min_periods=avg_rise_window).mean()
+    if (
+        returns is not None
+        and rise_kill_pct is not None
+        and rise_kill_pct > 0
+        and rise_kill_window is not None
+        and rise_kill_window > 0
+    ):
+        # returns are log returns; convert rolling log sum to simple pct move.
+        rise_pct_roll = np.exp(
+            returns.rolling(rise_kill_window, min_periods=rise_kill_window).sum()
+        ) - 1.0
     for i in range(len(idx)):
         # Detect rise today (ignore NaNs as False)
         is_rise = False
@@ -69,6 +82,18 @@ def wave_rider(
             if consec_rises_kill and consec_rises_kill > 0:
                 rises_run = (rises_run + 1) if is_rise else 0
                 if rises_run >= consec_rises_kill:
+                    in_pos = False
+                    no_reconf = 0
+                    rises_run = 0
+                    out.iloc[i] = in_pos
+                    continue
+            # Optional kill on cumulative rise over a short window.
+            if rise_pct_roll is not None:
+                try:
+                    rval = rise_pct_roll.iloc[i]
+                except Exception:
+                    rval = np.nan
+                if pd.notna(rval) and (rval >= rise_kill_pct):
                     in_pos = False
                     no_reconf = 0
                     rises_run = 0
@@ -159,6 +184,8 @@ def fxshort_gate(
     slope_exit_threshold: float = 0.0,
     require_carry: bool = False,
     consec_rises_kill: int = 3,
+    rise_kill_pct: float | None = None,
+    rise_kill_window: int | None = None,
     shift_for_signal: bool = False,
     carry_ann: float = 0.04,
     buffer20: float = 0.002,
@@ -168,11 +195,17 @@ def fxshort_gate(
     entry_mask: pd.Series | None = None,            # NEW: 
 ) -> pd.Series:
     """
-    Minimal FX short gate:
-      Entry base: slope < slope_entry_threshold (and carry if enabled)
+        Minimal FX short gate:
+            Entry base: slope < slope_entry_threshold
       Confirmation: need 'consec' consecutive eligible days
       Exit: slope >= slope_exit_threshold (next day if shift_for_signal)
     Optional fast kill: N consecutive positive return days.
+    Optional rise kill: if cumulative rise over `rise_kill_window` days exceeds
+    `rise_kill_pct` (simple return), position is closed.
+
+        Note: require_carry is kept for API compatibility, but entry gating is
+        now cost-only (no carry-based filter). Carry and fees are handled in
+        net return calculations.
 
     slope_source:
       - "log_price": rolling OLS slope of log(price) (default)
@@ -193,10 +226,7 @@ def fxshort_gate(
     else:
         raise ValueError("slope_source must be one of: 'log_price', 'returns_mean', 'returns_slope'")
 
-    carry_edges = (
-        _carry_edges_2060(returns, carry_ann, buffer20)
-        if require_carry else pd.Series(True, index=s.index)
-    ).fillna(False)
+    carry_edges = pd.Series(True, index=s.index).fillna(False)
 
     # DEFINE ENTRY EXIT PARAMS FOR WAVERIDER + ENTRY MASK
     entry_base = (slope < slope_entry_threshold) & carry_edges
@@ -228,6 +258,8 @@ def fxshort_gate(
         returns=returns,
         avg_rise_window=None,
         avg_rise_threshold=None,
+        rise_kill_pct=rise_kill_pct,
+        rise_kill_window=rise_kill_window,
     )
     # Suppress short spikes
     gate = _enforce_min_run(gate, min_run_days)
@@ -239,34 +271,8 @@ def fxshort_gate(
 
 
 def plot_gate_state(ticker: str, s: pd.Series, gate_stateon: pd.Series) -> None:
-    plt.style.use('dark_background')
-
-    # Use Mon–Fri only for plotting to avoid weekend prints often present in FX feeds
-    # s=s.tail(200)
     s_std_plot = functions2.standardize_fx_daily_index(s)
-
-    # Select tail for plotting
-    # s_plot = s_std_plot.tail(TAIL_BARS) –if TAIL_BARS else s_std_plot
-    s_plot = s_std_plot
-    fig, ax = plt.subplots(figsize=(11, 6))
-    # Base price plot
-    s_plot.plot(ax=ax, color='steelblue', lw=1.2, label=ticker)
-    # Align gate_state to price index (gate is Mon–Fri too)
-    g = gate_stateon.reindex(s_plot.index).fillna(False).astype(bool)
-    # print(f'gateon aligned to price (last 20 rows):\n{gate_stateon}')
-    # Overlay markers colored by gate_state state on the price series
-    colors = np.where(g.values, 'crimson', 'blue')
-    ax.scatter(s_plot.index, s_plot.values, c=colors, s=12, zorder=3)
-    # Legend: include price and gate_state state keys
-    from matplotlib.lines import Line2D
-    handles, labels = ax.get_legend_handles_labels()
-    gate_true = Line2D([0],[0], marker='o', color='w', label='Gate True', markerfacecolor='crimson', markersize=6)
-    gate_false = Line2D([0],[0], marker='o', color='w', label='Gate False', markerfacecolor='blue', markeredgecolor='gray', markersize=6)
-    ax.legend(handles + [gate_true, gate_false], labels + ['Gate True','Gate False'], loc='upper left')
-    ax.set_title(f'{ticker}CHF with gate_state True/False markers (Mon–Fri)')
-    ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.show()
+    functions2.plotter(ticker=ticker, prices=s_std_plot, gate_stateon=gate_stateon, TAIL_BARS=0)
 
 def analyze_gate_trades(price: pd.Series,
                         gate: pd.Series,
@@ -397,6 +403,8 @@ def sweep_fxshort_gate(
     slope_exit_thr_offsets: Iterable[float] = (0.0, 1e-4, 3e-4),
     require_carry_vals: Iterable[bool] = (False, True),
     consec_rises_kill_vals: Iterable[int] = (0, 1, 2),
+    rise_kill_pct_vals: Iterable[float | None] = (None,),
+    rise_kill_window_vals: Iterable[int] = (3,),
     carry_ann_vals: Iterable[float] = (0.04,),
     buffer20_vals: Iterable[float] = (0.002,),
     max_combos: int | None = None,
@@ -405,18 +413,25 @@ def sweep_fxshort_gate(
     grace_days_vals: Iterable[int] = (0,),     # NEW: sweep grace_days if desired
     slope_source_vals: Iterable[str] = ("log_price",),  # NEW: sweep source
     debug: bool = False,                        # NEW: optional diagnostics
+    plot_top_gate: bool = True,
+    fee_per_trade: float = 0.00004,
+    slippage_per_trade: float = 0.0,
+    other_daily_fee_ann: float = 0.0,
 ) -> Tuple[pd.DataFrame, pd.Timestamp, pd.Timestamp]:
     # print('+++sweep_fxshort_gate')
     s = functions2.standardize_fx_daily_index(price)
 
 
+    # require_carry_vals is retained for backward compatibility but does not
+    # affect entry logic in cost-only mode.
     combos = itertools.product(
         slope_window_vals,
         consec_vals,
         slope_entry_thr_vals,
         slope_exit_thr_offsets,
-        require_carry_vals,
         consec_rises_kill_vals,
+        rise_kill_pct_vals,
+        rise_kill_window_vals,
         carry_ann_vals,
         buffer20_vals,
         grace_days_vals,
@@ -424,9 +439,12 @@ def sweep_fxshort_gate(
     )
 
     records = []
-    for idx, (slope_w, consec, ent_thr, exit_off, req_carry, rises_kill, carry_ann, buf20, gdays, ssource) in enumerate(combos):
+    for idx, (slope_w, consec, ent_thr, exit_off, rises_kill, rise_kill_pct, rise_kill_window, carry_ann, buf20, gdays, ssource) in enumerate(combos):
         if max_combos and idx >= max_combos:
             break
+        if rise_kill_pct is None or rise_kill_pct <= 0:
+            rise_kill_pct = None
+            rise_kill_window = None
         exit_thr = ent_thr + exit_off
         if exit_thr < ent_thr:
             continue
@@ -439,9 +457,10 @@ def sweep_fxshort_gate(
                 buffer20=buf20,
                 slope_entry_threshold=ent_thr,
                 slope_exit_threshold=exit_thr,
-                require_carry=req_carry,
                 shift_for_signal=True,
                 consec_rises_kill=rises_kill,
+                rise_kill_pct=rise_kill_pct,
+                rise_kill_window=rise_kill_window,
                 grace_days=gdays,
                 slope_source=ssource,
             )
@@ -450,9 +469,10 @@ def sweep_fxshort_gate(
             if stats.get("trades", 0) < min_trades:
                 continue
 
-            FEE_PER_TRADE = 0.00004
-            trades["carry_cost"] = trades["holding_days"] * (carry_ann / 365)
-            trades["fee_cost"] = FEE_PER_TRADE
+            per_day_cost_ann = carry_ann + other_daily_fee_ann
+            round_trip_cost = fee_per_trade + slippage_per_trade
+            trades["carry_cost"] = trades["holding_days"] * (per_day_cost_ann / 365)
+            trades["fee_cost"] = round_trip_cost
             trades["net_pct_return"] = trades["pct_return"] - trades["carry_cost"] - trades["fee_cost"]
             stats["net_expectancy_per_trade"] = trades["net_pct_return"].mean()
         except Exception as e:
@@ -467,9 +487,14 @@ def sweep_fxshort_gate(
             "consec": consec,
             "slope_entry_thr": ent_thr,
             "slope_exit_thr": exit_thr,
-            "require_carry": req_carry,
+            "require_carry": True,
             "consec_rises_kill": rises_kill,
+            "rise_kill_pct": rise_kill_pct,
+            "rise_kill_window": rise_kill_window,
             "carry_ann": carry_ann,
+            "other_daily_fee_ann": other_daily_fee_ann,
+            "fee_per_trade": fee_per_trade,
+            "slippage_per_trade": slippage_per_trade,
             "buffer20": buf20,
             "grace_days": gdays,
             "slope_source": ssource,
@@ -479,7 +504,6 @@ def sweep_fxshort_gate(
         records.append(rec)
 
     if not records:
-        print("No valid gate configurations found in sweep.")
         return pd.DataFrame()  # return triple consistently
 
     df = pd.DataFrame(records)
@@ -493,9 +517,10 @@ def sweep_fxshort_gate(
         kind="mergesort"
     ).reset_index(drop=True)
 
-    topgate = df.iloc[0]['gate']
-    # Call local function directly (was fxshort_gates.plot_gate_state)
-    plot_gate_state(ticker, s, topgate)
+    if plot_top_gate:
+        topgate = df.iloc[0]['gate']
+        # Call local function directly (was fxshort_gates.plot_gate_state)
+        plot_gate_state(ticker, s, topgate)
 
     df = df.head(1).drop(columns=['gate'])
     return df
@@ -504,7 +529,7 @@ def summarize_top(df: pd.DataFrame, top: int = 10) -> pd.DataFrame:
     cols = [
         "carry_ann","slope_window","consec",
         "slope_entry_thr","slope_exit_thr",
-        "require_carry","consec_rises_kill","buffer20",
+        "require_carry","consec_rises_kill","rise_kill_pct","rise_kill_window","buffer20",
         "trades","win_rate","net_expectancy_per_trade","total_pct_return",
         "avg_pct_return","avg_win","avg_loss","median_holding_days",
         "max_draw_trade_pct","best_trade_pct"

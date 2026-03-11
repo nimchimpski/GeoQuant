@@ -31,7 +31,6 @@ CACHE_DIR.mkdir(exist_ok=True)
 params = {  'start': '2016-01-01', 
             'end': time.strftime("%Y%m%d"),
             'datasource': 'stooq',
-            'max_age' : 12,   # hours
 }
 
 # Module-level debug flag (no new function args). Set RISK_DEBUG=1 in env to enable verbose diagnostics.

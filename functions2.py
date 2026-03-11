@@ -191,7 +191,7 @@ def get_series(ticker, window_start=None, window_end=None) -> pd.Series:
     return s
 
 def plotter(ticker, prices, gate_stateon=None, TAIL_BARS=1000,):
-    plt.style.use('dark_background')   
+    plt.style.use('dark_background')
 
     # Select tail for plotting
     s_plot = prices.tail(TAIL_BARS) if TAIL_BARS else prices
@@ -199,7 +199,7 @@ def plotter(ticker, prices, gate_stateon=None, TAIL_BARS=1000,):
     # Base price plot
     s_plot.plot(ax=ax, color='steelblue', lw=1.2, label=ticker)
 
-    if gate_stateon:
+    if gate_stateon is not None:
  
         # Align gate_state to price index (gate is Mon–Fri too)
         g = gate_stateon.reindex(s_plot.index).fillna(False).astype(bool)
