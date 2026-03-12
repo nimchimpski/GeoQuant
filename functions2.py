@@ -11,7 +11,6 @@ from urllib.parse import urlparse
 from datetime import datetime, timedelta
 from config import *
 import functions1 as f1
-import functions2 as f2
 import config
 from config import params
 

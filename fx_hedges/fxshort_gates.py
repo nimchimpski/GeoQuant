@@ -506,6 +506,69 @@ def sweep_fxshort_gate(
     df = df.head(1).drop(columns=['gate'])
     return df
 
+def entry_delay_sensitivity(
+    price: pd.Series,
+    gate: pd.Series,
+    max_delay_days: int,
+    carry_ann: float,
+    other_daily_fee_ann: float,
+    fee_per_trade: float,
+    slippage_per_trade: float,
+) -> pd.DataFrame:
+    """Measure how net expectancy changes when trade entry is delayed by k days after gate turns True.
+
+    Delay=0 is transition-consistent (entry on the first True bar), matching the sweep/analysis
+    convention. Higher delays simulate real-world execution lag or deliberate confirmation waiting.
+
+    Returns a DataFrame with columns: entry_delay_days, trades, net_expectancy_per_trade,
+    total_net_return, delta_vs_delay0.
+    """
+    p = price.astype(float)
+    g = gate.reindex(p.index, fill_value=False).astype(bool)
+
+    prev = g.shift(1, fill_value=False)
+    entries = list(p.index[g & (~prev)])
+    exits = list(p.index[(~g) & prev])
+    if len(exits) < len(entries):
+        exits.append(p.index[-1])
+
+    runs = [(ent, ex) for ent, ex in zip(entries, exits) if ex >= ent]
+
+    rows = []
+    for delay in range(max_delay_days + 1):
+        trade_n = 0
+        net_returns = []
+        for ent, ex in runs:
+            ent_loc = p.index.get_loc(ent)
+            ex_loc = p.index.get_loc(ex)
+            delayed_loc = ent_loc + delay
+            if delayed_loc > ex_loc:
+                continue
+            d_ent = p.index[delayed_loc]
+            entry_price = float(p.loc[d_ent])
+            exit_price = float(p.loc[ex])
+            pct_ret = (entry_price - exit_price) / entry_price  # short return
+            holding_days = int((ex - d_ent).days)
+            carry_cost = holding_days * ((carry_ann + other_daily_fee_ann) / 365.0)
+            net_returns.append(pct_ret - carry_cost - fee_per_trade - slippage_per_trade)
+            trade_n += 1
+
+        if trade_n == 0:
+            rows.append({"entry_delay_days": delay, "trades": 0,
+                         "net_expectancy_per_trade": np.nan, "total_net_return": np.nan})
+            continue
+
+        arr = np.asarray(net_returns, dtype=float)
+        rows.append({"entry_delay_days": delay, "trades": int(trade_n),
+                     "net_expectancy_per_trade": float(arr.mean()),
+                     "total_net_return": float(arr.sum())})
+
+    out = pd.DataFrame(rows)
+    baseline = float(out.loc[out["entry_delay_days"] == 0, "net_expectancy_per_trade"].iloc[0])
+    out["delta_vs_delay0"] = out["net_expectancy_per_trade"] - baseline
+    return out
+
+
 def summarize_top(df: pd.DataFrame, top: int = 10) -> pd.DataFrame:
     cols = [
         "carry_ann","slope_window","consec",
