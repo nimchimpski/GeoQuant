@@ -8,7 +8,7 @@ import requests
 import pandas as pd
 from datetime import datetime, timezone, timedelta
 from config import *
-import functions2 as f2
+import series_utils as f2
 
 
 def cache_path( ticker: str) -> pathlib.Path:

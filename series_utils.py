@@ -10,7 +10,7 @@ from typing import Tuple, Dict
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
 from config import *
-import functions1 as f1
+import data_io as f1
 import config
 from config import params
 
