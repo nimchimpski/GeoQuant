@@ -111,19 +111,6 @@ def wave_rider(
         out.iloc[i] = in_pos
     return out
 
-def _carry_edges_2060(returns: pd.Series, carry_ann: float, buffer20: float) -> pd.Series:
-    """Original 20/60 carry edge conjunction (secondary filter)."""
-    R20 = returns.rolling(20, min_periods=20).sum()
-    R60 = returns.rolling(60, min_periods=60).sum()
-    idx = pd.Series(returns.index, index=returns.index)
-    span20_days = (idx - idx.shift(20)).dt.days
-    span60_days = (idx - idx.shift(60)).dt.days
-    span20_carry = carry_ann * (span20_days / 365.0)
-    span60_carry = carry_ann * (span60_days / 365.0)
-    signal20on = R20 < -(span20_carry + buffer20)
-    signal60on = R60 < -(span60_carry + 3.0 * buffer20)
-    return (signal20on & signal60on).fillna(False)
-
 def _rolling_ols_slope(log_price: pd.Series, window: int) -> pd.Series:
     """
     Rolling OLS slope of log_price vs time index (0..w-1).
@@ -226,10 +213,8 @@ def fxshort_gate(
     else:
         raise ValueError("slope_source must be one of: 'log_price', 'returns_mean', 'returns_slope'")
 
-    carry_edges = pd.Series(True, index=s.index).fillna(False)
-
     # DEFINE ENTRY EXIT PARAMS FOR WAVERIDER + ENTRY MASK
-    entry_base = (slope < slope_entry_threshold) & carry_edges
+    entry_base = (slope < slope_entry_threshold)
     if entry_mask is None:
       entry_mask = pd.Series(True, index=s.index)
     entry_mask = entry_mask.reindex(s.index).fillna(False)
@@ -245,7 +230,7 @@ def fxshort_gate(
         .reindex(s.index)
         .fillna(False)
     )
-    reconfirm = ((slope < slope_exit_threshold) & carry_edges).reindex(s.index).fillna(False)
+    reconfirm = (slope < slope_exit_threshold).reindex(s.index).fillna(False)
     pos_ret = (returns > 0).reindex(s.index).fillna(False)
 
     # GET THE GATE STATE SERIES
@@ -355,7 +340,6 @@ def analyze_gate_trades(price: pd.Series,
         return trades_df, {"trades": 0}
 
     # Aggregates
-    side_mult = -1 if position == "short" else 1  # already applied above; kept for clarity
     ret_col = "log_return" if use_log_return else "pct_return"
     wins = trades_df[ret_col] > 0
     losses = trades_df[ret_col] <= 0
@@ -401,11 +385,10 @@ def sweep_fxshort_gate(
     consec_vals: Iterable[int] = (1, 2, 3),
     slope_entry_thr_vals: Iterable[float] = (0.0, -1e-4, -5e-4),
     slope_exit_thr_offsets: Iterable[float] = (0.0, 1e-4, 3e-4),
-    require_carry_vals: Iterable[bool] = (False, True),
     consec_rises_kill_vals: Iterable[int] = (0, 1, 2),
     rise_kill_pct_vals: Iterable[float | None] = (None,),
     rise_kill_window_vals: Iterable[int] = (3,),
-    carry_ann_vals: Iterable[float] = (0.04,),
+    carry_ann_vals: float = 0.04,
     buffer20_vals: Iterable[float] = (0.002,),
     max_combos: int | None = None,
     rank_key: str = "net_expectancy_per_trade",
@@ -417,13 +400,12 @@ def sweep_fxshort_gate(
     fee_per_trade: float = 0.00004,
     slippage_per_trade: float = 0.0,
     other_daily_fee_ann: float = 0.0,
-) -> Tuple[pd.DataFrame, pd.Timestamp, pd.Timestamp]:
+) -> pd.DataFrame:
     # print('+++sweep_fxshort_gate')
     s = functions2.standardize_fx_daily_index(price)
 
 
-    # require_carry_vals is retained for backward compatibility but does not
-    # affect entry logic in cost-only mode.
+    # carry_ann_vals is treated as a fixed scalar carry assumption.
     combos = itertools.product(
         slope_window_vals,
         consec_vals,
@@ -432,7 +414,7 @@ def sweep_fxshort_gate(
         consec_rises_kill_vals,
         rise_kill_pct_vals,
         rise_kill_window_vals,
-        carry_ann_vals,
+        (carry_ann_vals,),
         buffer20_vals,
         grace_days_vals,
         slope_source_vals,
@@ -487,7 +469,6 @@ def sweep_fxshort_gate(
             "consec": consec,
             "slope_entry_thr": ent_thr,
             "slope_exit_thr": exit_thr,
-            "require_carry": True,
             "consec_rises_kill": rises_kill,
             "rise_kill_pct": rise_kill_pct,
             "rise_kill_window": rise_kill_window,
@@ -529,7 +510,7 @@ def summarize_top(df: pd.DataFrame, top: int = 10) -> pd.DataFrame:
     cols = [
         "carry_ann","slope_window","consec",
         "slope_entry_thr","slope_exit_thr",
-        "require_carry","consec_rises_kill","rise_kill_pct","rise_kill_window","buffer20",
+        "consec_rises_kill","rise_kill_pct","rise_kill_window","buffer20",
         "trades","win_rate","net_expectancy_per_trade","total_pct_return",
         "avg_pct_return","avg_win","avg_loss","median_holding_days",
         "max_draw_trade_pct","best_trade_pct"
