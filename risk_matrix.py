@@ -14,8 +14,9 @@ import seaborn as sns
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
 import config
-import functions2 as f2
-import functions1 as f1
+import series_utils as f2
+import data_io as f1
+import portfolio
 import books
 
 # print(holdings.IBKR_live)
@@ -59,7 +60,7 @@ def build_returns_weights(
             raise ValueError("window_start must be before window_end")
 
     
-    fx_map = f2.make_fx_map(holdings, params, no_fx, usd_shift)
+    fx_map = portfolio.make_fx_map(holdings, params, no_fx, usd_shift)
 
 
     # ------------BUILD CHF CLOSE SERIES PER ASSET-------------------
@@ -73,7 +74,7 @@ def build_returns_weights(
         ccy   = h["ccy"].upper()
 
         if h.get("type", "").lower() == "cash":
-            asset_close_local_s = f2.cash_series(ccy, fx_map)
+            asset_close_local_s = portfolio.cash_series(ccy, fx_map)
         else:
             ticker   = h.get("ticker")
             px_df = f1.fetch_csv_robust(ticker, params=params)
@@ -181,7 +182,7 @@ def build_returns_weights(
         name = h['name']
         size = h.get('position', 0.0)
 
-        chf_value = f2.get_holding_value_chf(h, fx_map, assets_close_local_df, assets_close_chf_df, asof)
+        chf_value = portfolio.get_holding_value_chf(h, fx_map, assets_close_local_df, assets_close_chf_df, asof)
   
         # print(f'CHF value {size} of {h["name"]}: {chf_value:.2f}')
         if chf_value is not None:

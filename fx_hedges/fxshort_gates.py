@@ -3,7 +3,7 @@ import pandas as pd
 from typing import Callable, Iterable, Tuple
 import itertools
 
-import functions2
+import series_utils
 
 def _enforce_min_run(gate: pd.Series, min_run: int) -> pd.Series:
     """
@@ -199,7 +199,7 @@ def fxshort_gate(
       - "returns_mean": rolling mean of log returns
       - "returns_slope": rolling OLS slope of log returns
     """
-    s = functions2.standardize_fx_daily_index(gbpchf).astype(float)
+    s = series_utils.standardize_fx_daily_index(gbpchf).astype(float)
     log_p = np.log(s)
     returns = log_p.diff()
 
@@ -256,8 +256,8 @@ def fxshort_gate(
 
 
 def plot_gate_state(ticker: str, s: pd.Series, gate_stateon: pd.Series) -> None:
-    s_std_plot = functions2.standardize_fx_daily_index(s)
-    functions2.plotter(ticker=ticker, prices=s_std_plot, gate_stateon=gate_stateon, TAIL_BARS=0)
+    s_std_plot = series_utils.standardize_fx_daily_index(s)
+    series_utils.plotter(ticker=ticker, prices=s_std_plot, gate_stateon=gate_stateon, TAIL_BARS=0)
 
 def analyze_gate_trades(price: pd.Series,
                         gate: pd.Series,
@@ -402,7 +402,7 @@ def sweep_fxshort_gate(
     other_daily_fee_ann: float = 0.0,
 ) -> pd.DataFrame:
     # print('+++sweep_fxshort_gate')
-    s = functions2.standardize_fx_daily_index(price)
+    s = series_utils.standardize_fx_daily_index(price)
 
 
     # carry_ann_vals is treated as a fixed scalar carry assumption.
