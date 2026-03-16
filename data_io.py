@@ -28,6 +28,8 @@ def looks_like_json(payload: bytes) -> bool:
     return payload.lstrip()[:1] in (b"{", b"[")
 
 def check_start_date(df, ticker: str, start: str, ) -> None:
+    if start is None:
+        return
     earliest = df.index.min().date()
     gap = (earliest - pd.to_datetime(start).date()).days
     print('gap days:', gap)

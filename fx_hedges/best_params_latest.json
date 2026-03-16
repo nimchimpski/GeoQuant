@@ -1,0 +1,17 @@
+{
+  "buffer20": 0.002,
+  "carry_ann": 0.053,
+  "consec": 1,
+  "consec_rises_kill": 0,
+  "grace_days": 2,
+  "min_run_days": 3,
+  "require_carry": true,
+  "rise_kill_pct": 0.01,
+  "rise_kill_window": 3,
+  "slope_entry_threshold": -0.0001,
+  "slope_exit_threshold": -0.0001,
+  "slope_source": "log_price",
+  "slope_window": 6,
+  "source_rank_col": "net_expectancy_per_trade",
+  "source_run_id": "f4d0cb3879ef"
+}
