@@ -1,15 +1,9 @@
 import numpy as np
 import pandas as pd
-from scipy import stats
-from typing import Tuple, Dict
-from dotenv import load_dotenv
-import matplotlib.pyplot as plt
-import itertools, math
-from urllib.parse import urlparse
-from datetime import datetime, timedelta
-from typing import Tuple, Dict, Iterable, Callable
+from typing import Callable, Iterable, Tuple
+import itertools
 
-import functions2
+import series_utils
 
 def _enforce_min_run(gate: pd.Series, min_run: int) -> pd.Series:
     """
@@ -32,6 +26,8 @@ def wave_rider(
     returns: pd.Series | None = None,
     avg_rise_window: int | None = None,
     avg_rise_threshold: float | None = None,
+    rise_kill_pct: float | None = None,
+    rise_kill_window: int | None = None,
  ) -> pd.Series:
 
     # print('wave_rider')
@@ -41,8 +37,20 @@ def wave_rider(
     no_reconf = 0
     rises_run = 0
     rmean = None
+    rise_pct_roll = None
     if returns is not None and avg_rise_window is not None and avg_rise_window > 0:
         rmean = returns.rolling(avg_rise_window, min_periods=avg_rise_window).mean()
+    if (
+        returns is not None
+        and rise_kill_pct is not None
+        and rise_kill_pct > 0
+        and rise_kill_window is not None
+        and rise_kill_window > 0
+    ):
+        # returns are log returns; convert rolling log sum to simple pct move.
+        rise_pct_roll = np.exp(
+            returns.rolling(rise_kill_window, min_periods=rise_kill_window).sum()
+        ) - 1.0
     for i in range(len(idx)):
         # Detect rise today (ignore NaNs as False)
         is_rise = False
@@ -79,6 +87,18 @@ def wave_rider(
                     rises_run = 0
                     out.iloc[i] = in_pos
                     continue
+            # Optional kill on cumulative rise over a short window.
+            if rise_pct_roll is not None:
+                try:
+                    rval = rise_pct_roll.iloc[i]
+                except Exception:
+                    rval = np.nan
+                if pd.notna(rval) and (rval >= rise_kill_pct):
+                    in_pos = False
+                    no_reconf = 0
+                    rises_run = 0
+                    out.iloc[i] = in_pos
+                    continue
             # Grace-days logic based on reconfirmation
             if bool(reconfirm.iloc[i]):
                 no_reconf = 0
@@ -90,19 +110,6 @@ def wave_rider(
                     rises_run = 0
         out.iloc[i] = in_pos
     return out
-
-def _carry_edges_2060(returns: pd.Series, carry_ann: float, buffer20: float) -> pd.Series:
-    """Original 20/60 carry edge conjunction (secondary filter)."""
-    R20 = returns.rolling(20, min_periods=20).sum()
-    R60 = returns.rolling(60, min_periods=60).sum()
-    idx = pd.Series(returns.index, index=returns.index)
-    span20_days = (idx - idx.shift(20)).dt.days
-    span60_days = (idx - idx.shift(60)).dt.days
-    span20_carry = carry_ann * (span20_days / 365.0)
-    span60_carry = carry_ann * (span60_days / 365.0)
-    signal20on = R20 < -(span20_carry + buffer20)
-    signal60on = R60 < -(span60_carry + 3.0 * buffer20)
-    return (signal20on & signal60on).fillna(False)
 
 def _rolling_ols_slope(log_price: pd.Series, window: int) -> pd.Series:
     """
@@ -164,6 +171,8 @@ def fxshort_gate(
     slope_exit_threshold: float = 0.0,
     require_carry: bool = False,
     consec_rises_kill: int = 3,
+    rise_kill_pct: float | None = None,
+    rise_kill_window: int | None = None,
     shift_for_signal: bool = False,
     carry_ann: float = 0.04,
     buffer20: float = 0.002,
@@ -173,18 +182,24 @@ def fxshort_gate(
     entry_mask: pd.Series | None = None,            # NEW: 
 ) -> pd.Series:
     """
-    Minimal FX short gate:
-      Entry base: slope < slope_entry_threshold (and carry if enabled)
+        Minimal FX short gate:
+            Entry base: slope < slope_entry_threshold
       Confirmation: need 'consec' consecutive eligible days
       Exit: slope >= slope_exit_threshold (next day if shift_for_signal)
     Optional fast kill: N consecutive positive return days.
+    Optional rise kill: if cumulative rise over `rise_kill_window` days exceeds
+    `rise_kill_pct` (simple return), position is closed.
+
+        Note: require_carry is kept for API compatibility, but entry gating is
+        now cost-only (no carry-based filter). Carry and fees are handled in
+        net return calculations.
 
     slope_source:
       - "log_price": rolling OLS slope of log(price) (default)
       - "returns_mean": rolling mean of log returns
       - "returns_slope": rolling OLS slope of log returns
     """
-    s = functions2.standardize_fx_daily_index(gbpchf).astype(float)
+    s = series_utils.standardize_fx_daily_index(gbpchf).astype(float)
     log_p = np.log(s)
     returns = log_p.diff()
 
@@ -198,13 +213,8 @@ def fxshort_gate(
     else:
         raise ValueError("slope_source must be one of: 'log_price', 'returns_mean', 'returns_slope'")
 
-    carry_edges = (
-        _carry_edges_2060(returns, carry_ann, buffer20)
-        if require_carry else pd.Series(True, index=s.index)
-    ).fillna(False)
-
     # DEFINE ENTRY EXIT PARAMS FOR WAVERIDER + ENTRY MASK
-    entry_base = (slope < slope_entry_threshold) & carry_edges
+    entry_base = (slope < slope_entry_threshold)
     if entry_mask is None:
       entry_mask = pd.Series(True, index=s.index)
     entry_mask = entry_mask.reindex(s.index).fillna(False)
@@ -220,7 +230,7 @@ def fxshort_gate(
         .reindex(s.index)
         .fillna(False)
     )
-    reconfirm = ((slope < slope_exit_threshold) & carry_edges).reindex(s.index).fillna(False)
+    reconfirm = (slope < slope_exit_threshold).reindex(s.index).fillna(False)
     pos_ret = (returns > 0).reindex(s.index).fillna(False)
 
     # GET THE GATE STATE SERIES
@@ -233,6 +243,8 @@ def fxshort_gate(
         returns=returns,
         avg_rise_window=None,
         avg_rise_threshold=None,
+        rise_kill_pct=rise_kill_pct,
+        rise_kill_window=rise_kill_window,
     )
     # Suppress short spikes
     gate = _enforce_min_run(gate, min_run_days)
@@ -244,34 +256,8 @@ def fxshort_gate(
 
 
 def plot_gate_state(ticker: str, s: pd.Series, gate_stateon: pd.Series) -> None:
-    plt.style.use('dark_background')
-
-    # Use Mon–Fri only for plotting to avoid weekend prints often present in FX feeds
-    # s=s.tail(200)
-    s_std_plot = functions2.standardize_fx_daily_index(s)
-
-    # Select tail for plotting
-    # s_plot = s_std_plot.tail(TAIL_BARS) –if TAIL_BARS else s_std_plot
-    s_plot = s_std_plot
-    fig, ax = plt.subplots(figsize=(11, 6))
-    # Base price plot
-    s_plot.plot(ax=ax, color='steelblue', lw=1.2, label=ticker)
-    # Align gate_state to price index (gate is Mon–Fri too)
-    g = gate_stateon.reindex(s_plot.index).fillna(False).astype(bool)
-    # print(f'gateon aligned to price (last 20 rows):\n{gate_stateon}')
-    # Overlay markers colored by gate_state state on the price series
-    colors = np.where(g.values, 'crimson', 'blue')
-    ax.scatter(s_plot.index, s_plot.values, c=colors, s=12, zorder=3)
-    # Legend: include price and gate_state state keys
-    from matplotlib.lines import Line2D
-    handles, labels = ax.get_legend_handles_labels()
-    gate_true = Line2D([0],[0], marker='o', color='w', label='Gate True', markerfacecolor='crimson', markersize=6)
-    gate_false = Line2D([0],[0], marker='o', color='w', label='Gate False', markerfacecolor='blue', markeredgecolor='gray', markersize=6)
-    ax.legend(handles + [gate_true, gate_false], labels + ['Gate True','Gate False'], loc='upper left')
-    ax.set_title(f'{ticker}CHF with gate_state True/False markers (Mon–Fri)')
-    ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.show()
+    s_std_plot = series_utils.standardize_fx_daily_index(s)
+    series_utils.plotter(ticker=ticker, prices=s_std_plot, gate_stateon=gate_stateon, TAIL_BARS=0)
 
 def analyze_gate_trades(price: pd.Series,
                         gate: pd.Series,
@@ -354,7 +340,6 @@ def analyze_gate_trades(price: pd.Series,
         return trades_df, {"trades": 0}
 
     # Aggregates
-    side_mult = -1 if position == "short" else 1  # already applied above; kept for clarity
     ret_col = "log_return" if use_log_return else "pct_return"
     wins = trades_df[ret_col] > 0
     losses = trades_df[ret_col] <= 0
@@ -400,9 +385,10 @@ def sweep_fxshort_gate(
     consec_vals: Iterable[int] = (1, 2, 3),
     slope_entry_thr_vals: Iterable[float] = (0.0, -1e-4, -5e-4),
     slope_exit_thr_offsets: Iterable[float] = (0.0, 1e-4, 3e-4),
-    require_carry_vals: Iterable[bool] = (False, True),
     consec_rises_kill_vals: Iterable[int] = (0, 1, 2),
-    carry_ann_vals: Iterable[float] = (0.04,),
+    rise_kill_pct_vals: Iterable[float | None] = (None,),
+    rise_kill_window_vals: Iterable[int] = (3,),
+    carry_ann_vals: float = 0.04,
     buffer20_vals: Iterable[float] = (0.002,),
     max_combos: int | None = None,
     rank_key: str = "net_expectancy_per_trade",
@@ -410,28 +396,37 @@ def sweep_fxshort_gate(
     grace_days_vals: Iterable[int] = (0,),     # NEW: sweep grace_days if desired
     slope_source_vals: Iterable[str] = ("log_price",),  # NEW: sweep source
     debug: bool = False,                        # NEW: optional diagnostics
-) -> Tuple[pd.DataFrame, pd.Timestamp, pd.Timestamp]:
+    plot_top_gate: bool = True,
+    fee_per_trade: float = 0.00004,
+    slippage_per_trade: float = 0.0,
+    other_daily_fee_ann: float = 0.0,
+) -> pd.DataFrame:
     # print('+++sweep_fxshort_gate')
-    s = functions2.standardize_fx_daily_index(price)
+    s = series_utils.standardize_fx_daily_index(price)
 
 
+    # carry_ann_vals is treated as a fixed scalar carry assumption.
     combos = itertools.product(
         slope_window_vals,
         consec_vals,
         slope_entry_thr_vals,
         slope_exit_thr_offsets,
-        require_carry_vals,
         consec_rises_kill_vals,
-        carry_ann_vals,
+        rise_kill_pct_vals,
+        rise_kill_window_vals,
+        (carry_ann_vals,),
         buffer20_vals,
         grace_days_vals,
         slope_source_vals,
     )
 
     records = []
-    for idx, (slope_w, consec, ent_thr, exit_off, req_carry, rises_kill, carry_ann, buf20, gdays, ssource) in enumerate(combos):
+    for idx, (slope_w, consec, ent_thr, exit_off, rises_kill, rise_kill_pct, rise_kill_window, carry_ann, buf20, gdays, ssource) in enumerate(combos):
         if max_combos and idx >= max_combos:
             break
+        if rise_kill_pct is None or rise_kill_pct <= 0:
+            rise_kill_pct = None
+            rise_kill_window = None
         exit_thr = ent_thr + exit_off
         if exit_thr < ent_thr:
             continue
@@ -444,9 +439,10 @@ def sweep_fxshort_gate(
                 buffer20=buf20,
                 slope_entry_threshold=ent_thr,
                 slope_exit_threshold=exit_thr,
-                require_carry=req_carry,
                 shift_for_signal=True,
                 consec_rises_kill=rises_kill,
+                rise_kill_pct=rise_kill_pct,
+                rise_kill_window=rise_kill_window,
                 grace_days=gdays,
                 slope_source=ssource,
             )
@@ -455,9 +451,10 @@ def sweep_fxshort_gate(
             if stats.get("trades", 0) < min_trades:
                 continue
 
-            FEE_PER_TRADE = 0.00004
-            trades["carry_cost"] = trades["holding_days"] * (carry_ann / 365)
-            trades["fee_cost"] = FEE_PER_TRADE
+            per_day_cost_ann = carry_ann + other_daily_fee_ann
+            round_trip_cost = fee_per_trade + slippage_per_trade
+            trades["carry_cost"] = trades["holding_days"] * (per_day_cost_ann / 365)
+            trades["fee_cost"] = round_trip_cost
             trades["net_pct_return"] = trades["pct_return"] - trades["carry_cost"] - trades["fee_cost"]
             stats["net_expectancy_per_trade"] = trades["net_pct_return"].mean()
         except Exception as e:
@@ -472,9 +469,13 @@ def sweep_fxshort_gate(
             "consec": consec,
             "slope_entry_thr": ent_thr,
             "slope_exit_thr": exit_thr,
-            "require_carry": req_carry,
             "consec_rises_kill": rises_kill,
+            "rise_kill_pct": rise_kill_pct,
+            "rise_kill_window": rise_kill_window,
             "carry_ann": carry_ann,
+            "other_daily_fee_ann": other_daily_fee_ann,
+            "fee_per_trade": fee_per_trade,
+            "slippage_per_trade": slippage_per_trade,
             "buffer20": buf20,
             "grace_days": gdays,
             "slope_source": ssource,
@@ -484,7 +485,6 @@ def sweep_fxshort_gate(
         records.append(rec)
 
     if not records:
-        print("No valid gate configurations found in sweep.")
         return pd.DataFrame()  # return triple consistently
 
     df = pd.DataFrame(records)
@@ -498,18 +498,82 @@ def sweep_fxshort_gate(
         kind="mergesort"
     ).reset_index(drop=True)
 
-    topgate = df.iloc[0]['gate']
-    # Call local function directly (was fxshort_gates.plot_gate_state)
-    plot_gate_state(ticker, s, topgate)
+    if plot_top_gate:
+        topgate = df.iloc[0]['gate']
+        # Call local function directly (was fxshort_gates.plot_gate_state)
+        plot_gate_state(ticker, s, topgate)
 
     df = df.head(1).drop(columns=['gate'])
     return df
+
+def entry_delay_sensitivity(
+    price: pd.Series,
+    gate: pd.Series,
+    max_delay_days: int,
+    carry_ann: float,
+    other_daily_fee_ann: float,
+    fee_per_trade: float,
+    slippage_per_trade: float,
+) -> pd.DataFrame:
+    """Measure how net expectancy changes when trade entry is delayed by k days after gate turns True.
+
+    Delay=0 is transition-consistent (entry on the first True bar), matching the sweep/analysis
+    convention. Higher delays simulate real-world execution lag or deliberate confirmation waiting.
+
+    Returns a DataFrame with columns: entry_delay_days, trades, net_expectancy_per_trade,
+    total_net_return, delta_vs_delay0.
+    """
+    p = price.astype(float)
+    g = gate.reindex(p.index, fill_value=False).astype(bool)
+
+    prev = g.shift(1, fill_value=False)
+    entries = list(p.index[g & (~prev)])
+    exits = list(p.index[(~g) & prev])
+    if len(exits) < len(entries):
+        exits.append(p.index[-1])
+
+    runs = [(ent, ex) for ent, ex in zip(entries, exits) if ex >= ent]
+
+    rows = []
+    for delay in range(max_delay_days + 1):
+        trade_n = 0
+        net_returns = []
+        for ent, ex in runs:
+            ent_loc = p.index.get_loc(ent)
+            ex_loc = p.index.get_loc(ex)
+            delayed_loc = ent_loc + delay
+            if delayed_loc > ex_loc:
+                continue
+            d_ent = p.index[delayed_loc]
+            entry_price = float(p.loc[d_ent])
+            exit_price = float(p.loc[ex])
+            pct_ret = (entry_price - exit_price) / entry_price  # short return
+            holding_days = int((ex - d_ent).days)
+            carry_cost = holding_days * ((carry_ann + other_daily_fee_ann) / 365.0)
+            net_returns.append(pct_ret - carry_cost - fee_per_trade - slippage_per_trade)
+            trade_n += 1
+
+        if trade_n == 0:
+            rows.append({"entry_delay_days": delay, "trades": 0,
+                         "net_expectancy_per_trade": np.nan, "total_net_return": np.nan})
+            continue
+
+        arr = np.asarray(net_returns, dtype=float)
+        rows.append({"entry_delay_days": delay, "trades": int(trade_n),
+                     "net_expectancy_per_trade": float(arr.mean()),
+                     "total_net_return": float(arr.sum())})
+
+    out = pd.DataFrame(rows)
+    baseline = float(out.loc[out["entry_delay_days"] == 0, "net_expectancy_per_trade"].iloc[0])
+    out["delta_vs_delay0"] = out["net_expectancy_per_trade"] - baseline
+    return out
+
 
 def summarize_top(df: pd.DataFrame, top: int = 10) -> pd.DataFrame:
     cols = [
         "carry_ann","slope_window","consec",
         "slope_entry_thr","slope_exit_thr",
-        "require_carry","consec_rises_kill","buffer20",
+        "consec_rises_kill","rise_kill_pct","rise_kill_window","buffer20",
         "trades","win_rate","net_expectancy_per_trade","total_pct_return",
         "avg_pct_return","avg_win","avg_loss","median_holding_days",
         "max_draw_trade_pct","best_trade_pct"

@@ -1,0 +1,2 @@
+date,ticker,action,in_trading_window_today,enter_today,signal_quality_ok,trade_allowed_today,net_expectancy_after_costs,trades,win_rate,payoff_ratio,max_draw_trade_pct,params_source,eval_scope,run_id
+2025-08-08,GBPCHF,HOLD,True,False,True,False,0.0006699542830396305,22,0.5,1.6815737405787807,-0.017614682243161046,loaded from sweep_results_e08ab9ff649c.csv with thresholds (net_expectancy_per_trade),selected sweep window 2024-05-08 -> 2025-08-08,e08ab9ff649c
