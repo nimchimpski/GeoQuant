@@ -32,8 +32,8 @@ def check_start_date(df, ticker: str, start: str, ) -> None:
         return
     earliest = df.index.min().date()
     gap = (earliest - pd.to_datetime(start).date()).days
-    print('gap days:', gap)
-    if gap != 0:
+    if gap > 3:
+        print('gap days:', gap)
         print('required start:', start,'\ndata start:', earliest)
 
 
@@ -547,8 +547,9 @@ def pick_close_column(df: pd.DataFrame) -> pd.Series:
 def sort_cols(df, ohlc=None):
     """Normalize time index and return a float close-like Series.
     """
-    if ohlc is None:
-        print('sort_cols: ohlc not set. True only needed for ATR calculations for vol stops. Defaulting to False')
+    # if ohlc is None:
+    #     print('sort_cols: ohlc not set. ')
+        # print('sort_cols: ohlc not set. True only needed for ATR calculations for vol stops. Defaulting to False')
     if not df.index.is_monotonic_increasing: 
         print('sort_cols: index wasnt sorted')
         df = df.sort_index()
@@ -594,7 +595,7 @@ def _latest_fx_rate(ccy: str, params: dict) -> float:
     return float(sort_cols(df).dropna().iloc[-1])
 
 
-def compute_nav(book: list, params: dict) -> dict:
+def compute_nav(books: list, params: dict) -> dict:
     """Compute NAV from a book (list of position/cash dicts from books.py).
 
     For each entry:
@@ -621,34 +622,36 @@ def compute_nav(book: list, params: dict) -> dict:
     cash_total = 0.0
     invested_total = 0.0
 
-    for entry in book:
-        name = entry.get('name', 'UNKNOWN')
-        ccy = entry.get('ccy', 'CHF')
+    for book in books:
+        for entry in book:
+            print('entry:', entry)
+            name = entry.get('name', 'UNKNOWN')
+            ccy = entry.get('ccy', 'CHF')
 
-        if entry.get('type') == 'cash':
-            amount = float(entry.get('amount', 0))
-            # Cash entries denominated in their own ccy → CHF
-            value_chf = amount * fx(ccy)
-            position_values[name] = value_chf
-            cash_total += value_chf
-        else:
-            ticker = entry.get('ticker')
-            n_units = float(entry.get('position', 0))
-            if not ticker or n_units == 0:
-                position_values[name] = 0.0
-                continue
-            df = fetch_csv_robust(ticker, params)
-            close = float(sort_cols(df).dropna().iloc[-1])
-            if entry.get('gbx', False):
-                close = close / 100.0   # pence → GBP
-            value_chf = close * n_units * fx(ccy)
-            position_values[name] = value_chf
-            invested_total += value_chf
+            if entry.get('type') == 'cash':
+                amount = float(entry.get('amount', 0))
+                # Cash entries denominated in their own ccy → CHF
+                value_chf = amount * fx(ccy)
+                position_values[name] = value_chf
+                cash_total += value_chf
+            else:
+                ticker = entry.get('ticker')
+                n_units = float(entry.get('position', 0))
+                if not ticker or n_units == 0:
+                    position_values[name] = 0.0
+                    continue
+                df = fetch_csv_robust(ticker, params)
+                close = float(sort_cols(df).dropna().iloc[-1])
+                if entry.get('gbx', False):
+                    close = close / 100.0   # pence → GBP
+                value_chf = close * n_units * fx(ccy)
+                position_values[name] = value_chf
+                invested_total += value_chf
 
     return {
-        'nav_total':    invested_total + cash_total,
-        'nav_invested': invested_total,
-        'positions':    position_values,
-        'cash_chf':     cash_total,
+        'nav_total':    round(invested_total + cash_total,2),
+        'nav_invested': round(invested_total,2),
+        'positions':    {k: round(v,2) for k, v in position_values.items()},
+        'cash_chf':     round(cash_total,2),
     }
 

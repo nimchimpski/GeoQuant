@@ -12,12 +12,12 @@ IBKR_live = [
     {"name":"XMWX",     "ticker":"XMWX.LSE", "ccy":"GBP", "GBP_exposure": 0.13,"gbx":False, "include_fx_vol":True, "position": 369},
     {"name":"EMIM",     "ticker":"EMIM.LSE", "ccy":"GBP", "USD_exposure": 0,"gbx":True, "position": 321},
 
-    {"name": "GWX", "ticker": "GWX.US", "ccy": "GBP", "USD_exposure": 0, "GBP_exposure": 0.07, "gbx":True, "position": 13},
+    {"name": "GWX", "ticker": "GWX.US", "ccy": "GBP", "USD_exposure": 0, "GBP_exposure": 0.07, "gbx":False, "position": 203},
     # DVIERSIFIERS
     {"name":"SGLN",      "ticker":"SGLN.LSE",      "ccy":"GBP", "USD_exposure": 1.0, "gbx":True, "include_fx_vol":True, "position": 68},
     # TACTICAL
     {"name": "YCA", "ticker": "YCA.LSE", "ccy": "GBP", "USD_exposure": 1.0, "gbx":True, "position": 689},
-    {"name": "BATG", "ticker": "BATG.LSE", "ccy": "GBP","USD_exposure": 1, "GBP_exposure": 0, "gbx":False, "position": 202},
+    {"name": "BATG", "ticker": "BATG.LSE", "ccy": "GBP","USD_exposure": 1, "GBP_exposure": 0, "gbx":True, "position": 202},
     {"name":"COPPER",     "ticker":"COPA.LSE", "ccy":"GBP", "USD_exposure": 0.70, "gbx":False, "position": 40},
     
     {"name": "CASH_CHF", "type": "cash", "ccy": "CHF", "amount": 14709, "include_fx_vol": True },
