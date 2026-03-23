@@ -14,9 +14,9 @@ import seaborn as sns
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
 import config
-import series_utils as f2
-import data_io as f1
-import portfolio
+import scripts.series_utils as f2
+import scripts.data_io as f1
+import scripts.portfolio as portfolio
 import books
 
 # print(holdings.IBKR_live)

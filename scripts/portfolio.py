@@ -2,8 +2,8 @@ import pandas as pd
 import numpy as np
 
 from config import *
-import data_io as f1
-import series_utils
+import scripts.data_io as f1
+import scripts.series_utils as series_utils
 
 
 def norm_risk_fx(val) -> bool:

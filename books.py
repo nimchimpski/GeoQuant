@@ -1,39 +1,28 @@
 computershare = [
-    {"name":"Unilever", "ticker":"ULVR.LON", "ccy":"GBP", "gbx":True,  "value_chf": 25000},
-    {"name":"Shell",    "ticker":"SHEL.LON", "ccy":"GBP", "gbx":True,  "value_chf": 13000},
-    {"name":"NatWest",  "ticker":"NWG.LON",  "ccy":"GBP", "gbx":True,  "value_chf":  5000},
-    {"name":"Barclays", "ticker":"BARC.LON", "ccy":"GBP", "gbx":True,  "value_chf":  5000},
-    {"name":"Tesco",    "ticker":"TSCO.LON", "ccy":"GBP", "gbx":True,  "value_chf":  5000},
-    {"name":"SWDA",     "ticker":"SWDA.LON", "ccy":"GBP", "gbx":True,  "value_chf":  12000},
-    {"name":"EMIM",     "ticker":"EMIM.LON", "ccy":"GBP", "gbx":True,  "value_chf":  8000},
-    {"name":"IBM",      "ticker":"IBM",      "ccy":"USD", "gbx":False, "value_chf":  4000},
-    {"name":"ERNS",     "ticker":"ERNS.LON", "ccy":"GBP", "gbx":True,  "value_chf":  5000},
+    {"name":"Unilever", "ticker":"ULVR.LON", "ccy":"GBP", "gbx":True,  "position": 1134},
+    {"name":"Magnum",       "ticker":"MICC.LON",   "ccy":"GBP", "gbx":True,  "position": 255},
+
+]
+AJBell = [
+    {"name":"NatWest",     "ticker":"NWG.LSE", "ccy":"GBP", "gbx":True,  "position": 377}
 ]
 IBKR_live = [
     # CORE
-    # {"name":"VEU",     "ticker":"VEU.US", "ccy":"USD", "GBP_exposure": 0.13,"gbx":False, "include_fx_vol":True, "position": 111,},
-    {"name":"XMWX",     "ticker":"XMWX.LSE", "ccy":"GBP", "GBP_exposure": 0.13,"gbx":False, "include_fx_vol":True, "position": 244},
-    {"name":"EMIM",     "ticker":"EMIM.LSE", "ccy":"GBP", "gbx":True, "position": 62},
-    {"name":"VUAG",     "ticker":"VUAG.LSE", "ccy":"GBP","USD_exposure": 1.0 , "gbx":False, "position": 23},
 
-    {"name": "ISJP", "ticker": "ISJP.SW", "ccy": "JPY", "USD_exposure": 0, "GBP_exposure": .0, "gbx":False, "position": 20},
-    {"name": "IEMS", "ticker": "IEMS.LSE", "ccy": "GBP", "USD_exposure": 0, "GBP_exposure": .0, "gbx":False, "position": 4},
-    # {"name": "XXSC", "ticker": "XXSC.LSE", "ccy": "GBP", "USD_exposure": 0, "GBP_exposure": .30, "gbx":True, "position": 13},
+    {"name":"XMWX",     "ticker":"XMWX.LSE", "ccy":"GBP", "GBP_exposure": 0.13,"gbx":False, "include_fx_vol":True, "position": 369},
+    {"name":"EMIM",     "ticker":"EMIM.LSE", "ccy":"GBP", "USD_exposure": 0,"gbx":True, "position": 321},
+
+    {"name": "GWX", "ticker": "GWX.US", "ccy": "GBP", "USD_exposure": 0, "GBP_exposure": 0.07, "gbx":True, "position": 13},
     # DVIERSIFIERS
-    # {"name":"SGLN",      "ticker":"SGLN.LSE",      "ccy":"GBP", "USD_exposure": 1.0, "gbx":True, "include_fx_vol":True, "position": 42},
-    # {"name": "YCA", "ticker": "YCA.LSE", "ccy": "GBP", "USD_exposure": 1.0, "gbx":True, "position": 258},
-    # {"name": "IPLT", "ticker": "IPLT.LSE", "ccy": "USD","USD_exposure": 1, "GBP_exposure": 0, "gbx":False, "position": 40},
-    # {"name":"SILG",     "ticker":"SILG.LSE", "ccy":"USD", "USD_exposure": 0.27, "GBP_exposure": 0.07,"gbx":False, "position": 38},
+    {"name":"SGLN",      "ticker":"SGLN.LSE",      "ccy":"GBP", "USD_exposure": 1.0, "gbx":True, "include_fx_vol":True, "position": 68},
     # TACTICAL
+    {"name": "YCA", "ticker": "YCA.LSE", "ccy": "GBP", "USD_exposure": 1.0, "gbx":True, "position": 689},
+    {"name": "BATG", "ticker": "BATG.LSE", "ccy": "GBP","USD_exposure": 1, "GBP_exposure": 0, "gbx":False, "position": 202},
+    {"name":"COPPER",     "ticker":"COPA.LSE", "ccy":"GBP", "USD_exposure": 0.70, "gbx":False, "position": 40},
+    
+    {"name": "CASH_CHF", "type": "cash", "ccy": "CHF", "amount": 14709, "include_fx_vol": True },
 
-    # {"name": "REMX", "ticker": "REMX.LSE", "ccy": "USD","USD_exposure": .30, "GBP_exposure": 0, "gbx":False, "position": 25},
-
-    # {"name": "INRG", "ticker": "INRG.LSE", "ccy": "GBP", "USD_exposure": .33, "GBP_exposure": .05, "gbx":True, "position": 290},
-    {"name": "NOVN", "ticker": "NOVN.SW", "ccy": "CHF", "USD_exposure": 0, "GBP_exposure": .0, "gbx":False, "position": 19},
-    # {"name": "CASH_CHF", "ticker": "", "type": "cash", "ccy": "CHF", "amount": 7717}, # leave out 10k savings?
-    # {"name": "CASH_GBP","ticker": "GBPCHF.FOREX", "type": "cash", "ccy": "GBP", "amount": -1500, "include_fx_vol": True },
-    # {"name": "CASH_USD","ticker": "USDCHF.FOREX", "type": "cash", "ccy": "USD", "amount": 0},
-    {"name": "CASH_JPY","ticker": "JPYCHF.FOREX", "type": "cash", "ccy": "JPY", "amount": -155314},
+    {"name": "CASH_JPY","ticker": "JPYCHF.FOREX", "type": "cash", "ccy": "JPY", "amount": 11416, "include_fx_vol": True },
 ]
 IBKR_live_adj = [
     # CORE

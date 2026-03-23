@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from typing import Tuple
 
 from config import params
-import data_io as f1
+import scripts.data_io as f1
 
 
 def _log_returns(s: pd.Series) -> pd.Series:

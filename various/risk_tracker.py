@@ -10,27 +10,57 @@ Usage:
 Author: built for personal portfolio risk management
 """
 
+import sys
 import json
 import os
 from datetime import datetime
 
+# Allow imports from project root and scripts/
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.dirname(_HERE)
+for _p in [_ROOT, os.path.join(_ROOT, 'scripts')]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+from books import IBKR_live, computershare, AJBell
+from scenario_configs import GEO_ESCALATION
+from data_io import compute_nav
+from config import params as _BASE_PARAMS
+
 # ─────────────────────────────────────────────
-# PORTFOLIO CONFIG - update these as positions change
+# FETCH LIVE NAV FROM BOOKS
 # ─────────────────────────────────────────────
 
-PORTFOLIO = {
-    'XMWX': {'weight': 0.20, 'escalation_sensitivity':  0.7,  'note': 'World ex-US, moderately exposed'},
-    'EMIM': {'weight': 0.22, 'escalation_sensitivity':  0.85, 'note': 'EM, highly exposed'},
-    'GWX':  {'weight': 0.11, 'escalation_sensitivity':  0.90, 'note': 'Small cap EM, most exposed'},
-    'SGLN': {'weight': 0.09, 'escalation_sensitivity': -0.30, 'note': 'Gold, partial hedge - can move inversely'},
-    'BATG': {'weight': 0.09, 'escalation_sensitivity':  0.65, 'note': 'Energy transition, medium exposed'},
-    'YCA':  {'weight': 0.08, 'escalation_sensitivity':  0.65, 'note': 'Energy transition, medium exposed'},
-    'COPA': {'weight': 0.03, 'escalation_sensitivity':  0.70, 'note': 'Copa Holdings, USD exposed'},
-}
+_ACTIVE_BOOKS = computershare + AJBell + IBKR_live
 
-NAV_CHF = 57600          # update regularly
-CASH_BUFFER_CHF = 15000  # current buffer
-CASH_TARGET_CHF = 20000  # your stated target
+_fetch_params = dict(_BASE_PARAMS)
+_fetch_params['max_age'] = 8  # hours — accept prices up to 8h old
+
+print("Fetching live prices for NAV calculation...")
+_nav = compute_nav(_ACTIVE_BOOKS, _fetch_params)
+
+NAV_CHF         = _nav['nav_total']
+NAV_INVESTED    = _nav['nav_invested']
+CASH_BUFFER_CHF = _nav['cash_chf']
+
+print(f"NAV total:    CHF {NAV_CHF:,.0f}")
+print(f"NAV invested: CHF {NAV_INVESTED:,.0f}")
+print(f"Cash buffer:  CHF {CASH_BUFFER_CHF:,.0f} ({CASH_BUFFER_CHF/NAV_CHF:.1%} of NAV)")
+
+# ─────────────────────────────────────────────
+# BUILD PORTFOLIO FROM BOOKS + SCENARIO CONFIG
+# Weights derived from live values; only positions in scenario config are included.
+# ─────────────────────────────────────────────
+
+PORTFOLIO = {}
+for _name, _scenario in GEO_ESCALATION.items():
+    _val = _nav['positions'].get(_name, 0.0)
+    _weight = _val / NAV_INVESTED if NAV_INVESTED > 0 else 0.0
+    PORTFOLIO[_name] = {
+        'weight': _weight,
+        'escalation_sensitivity': _scenario['sensitivity'],
+        'note': _scenario['note'],
+    }
 
 # ─────────────────────────────────────────────
 # EVIDENCE SCORING GUIDE (remind yourself before scoring)
@@ -243,8 +273,12 @@ def display_state(state):
     if rec['shortfall_chf'] > 0:
         print(f"   Shortfall: CHF {rec['shortfall_chf']:,.0f}")
         print(f"   Consider trimming most exposed positions:")
-        for name, pos in most_exposed_positions(prior)[:3]:
-            trim_value = rec['shortfall_chf'] * (pos['escalation_sensitivity'] / weighted_exposure)
+        exposed = most_exposed_positions(prior)
+        positive_exposure = sum(
+            pos['escalation_sensitivity'] for _, pos in exposed
+        )
+        for name, pos in exposed[:3]:
+            trim_value = rec['shortfall_chf'] * (pos['escalation_sensitivity'] / positive_exposure)
             print(f"   → {name}: sensitivity {pos['escalation_sensitivity']:.0%} | "
                   f"trim ~CHF {trim_value:,.0f} | {pos['note']}")
     else:
@@ -260,7 +294,7 @@ def display_state(state):
             print(f"    \"{entry['event']}\"")
 
 def display_scoring_guide():
-    print(SCORING_guide)
+    print(SCORING_GUIDE)
 
 # ─────────────────────────────────────────────
 # MAIN MENU
@@ -291,6 +325,9 @@ def main():
             except ValueError:
                 print("Invalid score")
                 continue
+            if not (-0.20 <= score <= 0.50):
+                print(f"  ⚠️  Score {score:+.2f} is outside expected range (-0.20 to +0.50). Clamping.")
+                score = max(-0.20, min(0.50, score))
 
             prior_before = state['prior']
             posterior = bayesian_update(prior_before, score)
@@ -322,6 +359,9 @@ def main():
         elif choice == '4':
             try:
                 new_prior = float(input("New prior (0-1): ").strip())
+                if not (0.0 <= new_prior <= 1.0):
+                    print("Prior must be between 0 and 1")
+                    continue
                 reason = input("Reason for reset: ").strip()
                 state['history'].append({
                     'date': datetime.now().isoformat(),

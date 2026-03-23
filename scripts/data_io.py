@@ -145,7 +145,55 @@ def clean_ohlc_flatbar_spikes(df: pd.DataFrame, *, ret_spike: float = 0.10, eps:
     changes = [(dt, float(old), float(cleaned.loc[dt, "Close"])) for (dt, old) in changes]
     return cleaned, changes
 
+# Step 1: any known suffix → canonical exchange name.
+# Extend this when books.py or a new source introduces a new suffix.
+_SUFFIX_TO_EXCHANGE: dict[str, str] = {
+    '.LSE':   'LSE',    # London (EODHD / Unicorn convention)
+    '.LON':   'LSE',    # London (alternative)
+    '.UK':    'LSE',    # London (stooq convention)
+    '.SW':    'SIX',    # SIX Swiss Exchange
+    '.US':    'US',     # US exchanges (NYSE / NASDAQ)
+    '.FOREX': 'FOREX',  # FX pairs
+}
+
+# Step 2: exchange + datasource → ticker suffix to use for download/cache.
+# Empty string means no suffix (e.g. stooq FX: GBPCHF).
+_EXCHANGE_TO_SUFFIX: dict[str, dict[str, str]] = {
+    'stooq': {
+        'LSE':   '.UK',
+        'SIX':   '.SW',
+        'US':    '.US',
+        'FOREX': '',
+    },
+    'eodhd': {
+        'LSE':   '.LSE',
+        'SIX':   '.SW',
+        'US':    '.US',
+        'FOREX': '.FOREX',
+    },
+}
+
+def resolve_ticker(ticker: str, datasource: str) -> str:
+    """Resolve any-suffix ticker to the datasource-specific form.
+
+    The resolved ticker is used for both the download URL and the cache filename,
+    so cache files are always named as they were downloaded.
+    Unknown suffixes are passed through unchanged.
+    """
+    upper = ticker.upper()
+    for suffix, exchange in _SUFFIX_TO_EXCHANGE.items():
+        if upper.endswith(suffix):
+            base = ticker[: -len(suffix)]
+            ds_suffix = _EXCHANGE_TO_SUFFIX.get(datasource, {}).get(exchange)
+            if ds_suffix is None:
+                # No mapping defined — pass through unchanged
+                return ticker
+            return base + ds_suffix
+    return ticker  # unrecognised suffix — pass through unchanged
+
+
 def build_url(datasource: str, ticker: str, params: dict) -> str:
+    """Build download URL. ticker must already be resolved for this datasource."""
     start = pd.to_datetime(params['start']).strftime('%Y%m%d')
     end = pd.to_datetime(params['end']).strftime('%Y%m%d')
     if datasource == 'stooq':
@@ -392,6 +440,9 @@ def fetch_csv_robust(ticker: str, params: dict=None, force_refresh: bool = False
     max_age = params['max_age']
     end = params.get('end', datetime.now(timezone.utc).strftime('%Y%m%d'))
 
+    # Resolve once — used for both cache filename and download URL
+    ticker = resolve_ticker(ticker, datasource)
+
     path = cache_path(ticker)
     meta = _read_cache_meta(ticker)
     monthly_full_due = _is_monthly_full_refresh_due(meta, interval_days=30)
@@ -522,4 +573,82 @@ def shift_usd_fx_next_day(fx_series: pd.Series) -> pd.Series:
     # if not isinstance(fx_series, pd.Series):
     #     raise TypeError("fx_series must be a pandas Series")
     return fx_series.shift(-1)
+
+
+# FX ticker map: currency code → stooq FX ticker (all quoted as X/CHF)
+_FX_TICKERS = {
+    'CHF': None,          # base currency — no conversion needed
+    'GBP': 'GBPCHF.FOREX',
+    'USD': 'USDCHF.FOREX',
+    'JPY': 'JPYCHF.FOREX',
+}
+
+def _latest_fx_rate(ccy: str, params: dict) -> float:
+    """Return the latest available closing FX rate for ccy→CHF."""
+    if ccy == 'CHF':
+        return 1.0
+    ticker = _FX_TICKERS.get(ccy)
+    if ticker is None:
+        raise ValueError(f"No FX ticker configured for currency: {ccy}")
+    df = fetch_csv_robust(ticker, params)
+    return float(sort_cols(df).dropna().iloc[-1])
+
+
+def compute_nav(book: list, params: dict) -> dict:
+    """Compute NAV from a book (list of position/cash dicts from books.py).
+
+    For each entry:
+      - cash entries ('type': 'cash'): value = amount × fx_rate_to_CHF
+      - position entries: fetches latest close, divides by 100 if gbx=True
+        (pence → GBP), multiplies by position count, converts to CHF.
+
+    Returns:
+        {
+            'nav_total':    float,   # all assets including cash
+            'nav_invested': float,   # equity positions only
+            'positions':    dict,    # name → value_chf for each entry
+            'cash_chf':     float,   # total cash in CHF
+        }
+    """
+    fx_cache: dict[str, float] = {}
+
+    def fx(ccy: str) -> float:
+        if ccy not in fx_cache:
+            fx_cache[ccy] = _latest_fx_rate(ccy, params)
+        return fx_cache[ccy]
+
+    position_values: dict[str, float] = {}
+    cash_total = 0.0
+    invested_total = 0.0
+
+    for entry in book:
+        name = entry.get('name', 'UNKNOWN')
+        ccy = entry.get('ccy', 'CHF')
+
+        if entry.get('type') == 'cash':
+            amount = float(entry.get('amount', 0))
+            # Cash entries denominated in their own ccy → CHF
+            value_chf = amount * fx(ccy)
+            position_values[name] = value_chf
+            cash_total += value_chf
+        else:
+            ticker = entry.get('ticker')
+            n_units = float(entry.get('position', 0))
+            if not ticker or n_units == 0:
+                position_values[name] = 0.0
+                continue
+            df = fetch_csv_robust(ticker, params)
+            close = float(sort_cols(df).dropna().iloc[-1])
+            if entry.get('gbx', False):
+                close = close / 100.0   # pence → GBP
+            value_chf = close * n_units * fx(ccy)
+            position_values[name] = value_chf
+            invested_total += value_chf
+
+    return {
+        'nav_total':    invested_total + cash_total,
+        'nav_invested': invested_total,
+        'positions':    position_values,
+        'cash_chf':     cash_total,
+    }
 
