@@ -1,4 +1,4 @@
-# risk_matrix
+# GeoQuant
 
 A personal portfolio risk management suite for a multi-currency equity/ETF portfolio held across UK (LSE), US, and Swiss exchanges via IBKR, AJBell, and Computershare. All valuations are denominated in **CHF**.
 
@@ -7,7 +7,7 @@ A personal portfolio risk management suite for a multi-currency equity/ETF portf
 - **NAV calculation** — values each holding in CHF using live FX rates
 - **Risk matrix** — computes a full covariance/correlation matrix with per-asset volatility, marginal risk contribution (MRC), and percent risk contribution (PRC)
 - **FX hedge signals** — rolling OLS trend-following gate for a GBP/CHF short position, with configurable entry/exit thresholds and parameter sweep
-- **Geopolitical risk overlay** — Bayesian probability engine that updates P(catastrophic escalation) from scored news events and recommends a cash buffer target
+- **Geopolitical risk overlay** — Bayesian engine that updates the estimated probability of a major escalation event based on scored news, and recommends a cash buffer target accordingly
 - **Price data caching** — TTL-based disk cache for Stooq OHLC CSVs with flat-bar spike cleaning
 
 ## Project structure
@@ -34,8 +34,8 @@ fx_hedges/
 
 1. **Clone the repo**
    ```bash
-   git clone https://github.com/nimchimpski/risk_matrix.git
-   cd risk_matrix
+   git clone https://github.com/nimchimpski/GeoQuant.git
+   cd GeoQuant
    ```
 
 2. **Install dependencies**
