@@ -1,6 +1,8 @@
 .env
 .DS_Store
 *.pyc
+books.py
+books_personal.py
 
 __pycache__/
 cache/
