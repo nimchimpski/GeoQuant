@@ -1,6 +1,6 @@
 # GeoQuant
 
-A personal portfolio risk management suite for a multi-currency equity/ETF portfolio held across UK (LSE), US, and Swiss exchanges via IBKR, AJBell, and Computershare. All valuations are denominated in **CHF**.
+A risk management suite for a multi-currency equity/ETF portfolio .
 
 ## What it does
 
@@ -82,4 +82,4 @@ Fetched CSVs are cached under `cache/` with a configurable TTL (default 24 hours
 
 ## Disclaimer
 
-This is a personal tool for tracking a real portfolio. It is not financial advice and is not designed for general use. Holdings and parameters reflect one individual's situation.
+This is a personal tool for tracking a real portfolio. It is not financial advice and is not designed for general use. Holdings and parameters are examples.
