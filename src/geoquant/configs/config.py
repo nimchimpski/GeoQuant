@@ -2,42 +2,42 @@
 import os
 import pathlib
 import yaml
+
 from dotenv import load_dotenv
 import time
 from matplotlib import ticker
 from dataclasses import dataclass
 
-load_dotenv()
+# Always load .env from the config directory, regardless of CWD
+from pathlib import Path
+load_dotenv(dotenv_path=Path(__file__).parent / ".env")
+
+STOOQ_API = os.environ.get("STOOQ_API")
+
+print(f"STOOQ_API: {STOOQ_API}")
+
 
 CONFIG_PATH = pathlib.Path(__file__).parent / "config.yaml"
 with open(CONFIG_PATH, "r") as f:
     config = yaml.safe_load(f)
 
-URL = config["URL"]
-# EOD_API = os.getenv("EOD_API")
-# # --- guard API ticker early ---
-# if not EOD_API or not isinstance(EOD_API, str):
-#     raise RuntimeError(
-#         "one or more api kays not found")
-
 # Always create cache in the project root, regardless of where script is run from
-# PROJECT_ROOT = pathlib.Path(__file__).parent.resolve()
-# CACHE_DIR = PROJECT_ROOT / "cache"
-# CACHE_DIR.mkdir(exist_ok=True)
+PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[2]
+CACHE_DIR =  pathlib.Path(__file__).parent / "cache"
+CACHE_DIR.mkdir(exist_ok=True)
 
 
-# DATA DOWNLOAD PARAMS
-# params = {  'start': '2016-01-01', 
-#             'end': time.strftime("%Y-%m-%d"),
-#             'datasource': 'stooq',
-#             'api_token': EOD_API,
-#             'max_age' : 0,   # hours
-# }
-# STOOQ
-params = {  'start': '2016-01-01', 
-            'end': time.strftime("%Y%m%d"),
-            'datasource': 'stooq',
+START = config["START"]
+DATASOURCE = config["DATASOURCE"]
+MAX_AGE = config["MAX_AGE"]
+END = config.get("END", time.strftime("%Y-%m-%d"))
+
+data_params = {
+    'start': START,
+    'datasource': DATASOURCE,
+    'max_age': MAX_AGE,
+    'end': END
+
 }
-
 # Module-level debug flag (no new function args). Set RISK_DEBUG=1 in env to enable verbose diagnostics.
 DEBUG = True

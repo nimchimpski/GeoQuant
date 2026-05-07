@@ -2,9 +2,11 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import Tuple
-
-from geoquant.configs.config import params
+import geoquant.configs.config as config
 import geoquant.data_io as f1
+from geoquant.configs.config import data_params
+
+
 
 
 def _log_returns(s: pd.Series) -> pd.Series:

@@ -192,14 +192,17 @@ def resolve_ticker(ticker: str, datasource: str) -> str:
     return ticker  # unrecognised suffix — pass through unchanged
 
 
-def build_url(datasource: str, ticker: str, params: dict) -> str:
+def build_url(datasource: str, ticker: str,data_params: dict) -> str:
     """Build download URL. ticker must already be resolved for this datasource."""
-    start = pd.to_datetime(params['start']).strftime('%Y%m%d')
-    end = pd.to_datetime(params['end']).strftime('%Y%m%d')
+    start = pd.to_datetime(data_params['start']).strftime('%Y%m%d')
+    end = pd.to_datetime(data_params['end']).strftime('%Y%m%d')
     if datasource == 'stooq':
+        from geoquant.configs.config import STOOQ_API
         url = f"https://stooq.com/q/d/l/?s={ticker}&d1={start}&d2={end}&i=d"
+        if STOOQ_API:
+            url += f"&apikey={STOOQ_API}"
     elif datasource == 'eodhd':
-        url = f'https://eodhd.com/api/eod/{ticker}?api_token={params["api_token"]}&from={start}&to={end}'
+        url = f'https://eodhd.com/api/eod/{ticker}?api_token={data_params["api_token"]}&from={start}&to={end}'
     else:
         raise ValueError(f"Unsupported datasource: {datasource}")
     return url
@@ -336,6 +339,17 @@ def _download_csv_frame(url: str, ticker: str) -> pd.DataFrame:
     resp.raise_for_status()
     raw = resp.content
 
+    # Debug: print first 10 lines of raw CSV for inspection
+    print(f"\n--- RAW CSV for {ticker} from {url} ---")
+    try:
+        for i, line in enumerate(raw.decode(errors='replace').splitlines()):
+            print(line)
+            if i >= 9:
+                break
+    except Exception as e:
+        print(f"[DEBUG] Could not decode raw response: {e}")
+    print("--- END RAW CSV ---\n")
+
     if looks_like_json(raw):
         try:
             msg = json.loads(raw.decode("utf-8", errors="ignore"))
@@ -359,75 +373,13 @@ def _download_csv_frame(url: str, ticker: str) -> pd.DataFrame:
     df = df[~df.index.isna()].sort_index()
     return df
 
-# def fetch_csv_robust1(ticker: str, params: dict=None) -> pd.DataFrame:
-    """
-        Robust CSV fetch with:
-      - on-disk cache (TTL),
-      - JSON throttle/error detection (does NOT overwrite cache),
-      - atomic write on success.
-        Returns a parsed DataFrame (index on first column).
-        """
-    # start = params['from']
-    start = params['from']
-    datasource = params['datasource']
-    url = build_url(datasource)
-    # url = f'{url}{ticker}'
-    max_age = params['max_age']
-    
-
-    # print(f'params: {params}')
-    path = cache_path( ticker)
-
-    # if cache is fresh return it (optionally post-clean)
-    if is_fresh(path, max_age):
-        # print(f"{ticker} - using cached data")
-        df = pd.read_csv(path, header=0, parse_dates=[0], index_col=0).sort_index()
-        check_start_date(df, ticker, start)
-
-        return df
-    print(f"{ticker} - downloading fresh data")
-    resp = requests.get(url, params=params)
-        
-    resp.raise_for_status()
-    raw = resp.content
 
 
-    # Detect JSON throttle/error; do not poison cache
-    if looks_like_json(raw):
-        # Try to show a concise message
-        try:
-            msg = json.loads(raw.decode("utf-8", errors="ignore"))
-        except Exception:
-            msg = {"body_head": raw[:200].decode("utf-8", errors="ignore")}
-        raise RuntimeError(f"... returned JSON (throttle/error) for :{ticker} -> {str(msg)[:180]}")
-
-    # Parse CSV and normalize
-    df = pd.read_csv(io.BytesIO(raw), header=0, parse_dates=[0], index_col=0).sort_index()
-    check_start_date(df, ticker, start)
-    # Optional cleaning on fresh download
-    do_clean = True
-    if do_clean:
-        cleaned, changes = clean_ohlc_flatbar_spikes(
-            df,
-            ret_spike = 0.10,
-        )
-        if changes:
-            print(f"{ticker} - cleaned {len(changes)} flat-bar spike(s) on download")
-        df_to_save = cleaned
-    else:
-        df_to_save = df
-    print('data start date b4 saving:', df_to_save.index.min().date())
-    # Atomic-ish write: save the (possibly cleaned) CSV
-    tmp = path.with_suffix(".tmp")
-    df_to_save.to_csv(tmp, date_format="%Y-%m-%d")
-    os.replace(tmp, path)
-    return df_to_save
-
-def url_builder(datasource: str, ticker: str, params: dict) -> str:
+def url_builder(datasource: str, ticker: str,data_params: dict) -> str:
     # Backward-compatible wrapper; keep callers stable while using one implementation.
-    return build_url(datasource, ticker, params)
+    return build_url(datasource, ticker,data_params)
 
-def fetch_csv_robust(ticker: str, params: dict=None, force_refresh: bool = False) -> pd.DataFrame:
+def fetch_csv_robust(ticker: str,data_params: dict=None, force_refresh: bool = False) -> pd.DataFrame:
     """
         Robust CSV fetch with:
       - on-disk cache (TTL),
@@ -435,10 +387,12 @@ def fetch_csv_robust(ticker: str, params: dict=None, force_refresh: bool = False
       - atomic write on success.
         Returns a parsed DataFrame (index on first column).
         """
-    start = params['start']
-    datasource = params['datasource']
-    max_age = params['max_age']
-    end = params.get('end', datetime.now(timezone.utc).strftime('%Y%m%d'))
+    print('+++fetch_csv_robust : config/data_params:', data_params)
+
+    start =data_params['start']
+    datasource =data_params['datasource']
+    max_age =data_params['max_age']
+    end =data_params.get('end', datetime.now(timezone.utc).strftime('%Y%m%d'))
 
     # Resolve once — used for both cache filename and download URL
     ticker = resolve_ticker(ticker, datasource)
@@ -460,21 +414,21 @@ def fetch_csv_robust(ticker: str, params: dict=None, force_refresh: bool = False
 
     # Decide between full refresh and incremental merge.
     if need_full_refresh:
-        params_full = dict(params)
-        params_full['start'] = start
-        params_full['end'] = end
+        data_params_full = dict(data_params)
+        data_params_full['start'] = start
+        data_params_full['end'] = end
         print(f"{ticker} - monthly/forced full refresh")
-        df_raw = _download_csv_frame(build_url(datasource, ticker, params_full), ticker)
+        df_raw = _download_csv_frame(build_url(datasource, ticker,data_params_full), ticker)
         mode = 'full'
     else:
         # Incremental update: fetch from day after cached max date to current end.
         df_cached = pd.read_csv(path, header=0, parse_dates=[0], index_col=0).sort_index()
         if df_cached.empty:
-            params_full = dict(params)
-            params_full['start'] = start
-            params_full['end'] = end
+            data_params_full = dict(data_params)
+            data_params_full['start'] = start
+            data_params_full['end'] = end
             print(f"{ticker} - cache empty, fallback full refresh")
-            df_raw = _download_csv_frame(build_url(datasource, ticker, params_full), ticker)
+            df_raw = _download_csv_frame(build_url(datasource, ticker, data_params_full), ticker)
             mode = 'full'
         else:
             last_cached = pd.to_datetime(df_cached.index.max())
@@ -486,12 +440,12 @@ def fetch_csv_robust(ticker: str, params: dict=None, force_refresh: bool = False
                 check_start_date(df_cached, ticker, start)
                 return df_cached
 
-            params_inc = dict(params)
-            params_inc['start'] = str(inc_start_dt)
-            params_inc['end'] = str(inc_end_dt)
-            print(f"{ticker} - incremental update {params_inc['start']} -> {params_inc['end']}")
+            data_params_inc = dict(data_params)
+            data_params_inc['start'] = str(inc_start_dt)
+            data_params_inc['end'] = str(inc_end_dt)
+            print(f"{ticker} - incremental update {data_params_inc['start']} -> {data_params_inc['end']}")
             try:
-                df_inc = _download_csv_frame(build_url(datasource, ticker, params_inc), ticker)
+                df_inc = _download_csv_frame(build_url(datasource, ticker, data_params_inc), ticker)
             except ValueError as exc:
                 # Some providers return empty payloads for same-day requests before EOD print.
                 if 'empty/tiny payload' in str(exc):
@@ -584,18 +538,18 @@ _FX_TICKERS = {
     'JPY': 'JPYCHF.FOREX',
 }
 
-def _latest_fx_rate(ccy: str, params: dict) -> float:
+def _latest_fx_rate(ccy: str, data_params: dict) -> float:
     """Return the latest available closing FX rate for ccy→CHF."""
     if ccy == 'CHF':
         return 1.0
     ticker = _FX_TICKERS.get(ccy)
     if ticker is None:
         raise ValueError(f"No FX ticker configured for currency: {ccy}")
-    df = fetch_csv_robust(ticker, params)
+    df = fetch_csv_robust(ticker, data_params)
     return float(sort_cols(df).dropna().iloc[-1])
 
 
-def compute_nav(books: list, params: dict) -> dict:
+def compute_nav(books: list, data_params: dict) -> dict:
     """Compute NAV from a book (list of position/cash dicts from books.py).
 
     For each entry:
@@ -615,7 +569,7 @@ def compute_nav(books: list, params: dict) -> dict:
 
     def fx(ccy: str) -> float:
         if ccy not in fx_cache:
-            fx_cache[ccy] = _latest_fx_rate(ccy, params)
+            fx_cache[ccy] = _latest_fx_rate(ccy, data_params)
         return fx_cache[ccy]
 
     position_values: dict[str, float] = {}
@@ -640,7 +594,7 @@ def compute_nav(books: list, params: dict) -> dict:
                 if not ticker or n_units == 0:
                     position_values[name] = 0.0
                     continue
-                df = fetch_csv_robust(ticker, params)
+                df = fetch_csv_robust(ticker, data_params)
                 close = float(sort_cols(df).dropna().iloc[-1])
                 if entry.get('gbx', False):
                     close = close / 100.0   # pence → GBP

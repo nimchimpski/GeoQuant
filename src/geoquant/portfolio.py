@@ -28,14 +28,14 @@ def norm_risk_fx(val) -> bool:
     return True
 
 
-def make_fx_map(holdings, params, usd_shift=True, ohlc=False) -> dict[str, pd.Series]:
+def make_fx_map(holdings, data_params, usd_shift=True, ohlc=False) -> dict[str, pd.Series]:
     # Pre-fetch FX once per currency (excluding CHF)
     fx_map: dict[str, pd.Series] = {}
     needed_ccy = sorted({h["ccy"].upper() for h in holdings if h["ccy"].upper() != "CHF"})
     for ccy in needed_ccy:
         ticker = f'{ccy}CHF.FOREX'
         # Fetch EODHD daily FX and build a Series
-        fx_df = f1.fetch_csv_robust(params=params, ticker=ticker)
+        fx_df = f1.fetch_csv_robust(data_params=data_params, ticker=ticker)
         # Normalize and pick close
         fx_s = f1.sort_cols(fx_df, ohlc)
         if not ohlc:
@@ -141,7 +141,7 @@ def deal_with_gbx(close_local_s: pd.Series, ccy: str, gbx: bool) -> pd.Series:
     return close_local_s
 
 
-def base_ccy_assets_px_df(holdings, fx_map, params, ohlc=False):
+def base_ccy_assets_px_df(holdings, fx_map, data_params, ohlc=False):
     """
     Build CHF risk series.
     - ohlc=False: returns a single Close-only DataFrame (Adjusted Close preferred)
@@ -155,8 +155,8 @@ def base_ccy_assets_px_df(holdings, fx_map, params, ohlc=False):
     close_cols = {}
     high_cols, low_cols = ({}, {}) if ohlc else (None, None)
 
-    from_dt = params.get("from")
-    to_dt = params.get("to")
+    from_dt = data_params.get("from")
+    to_dt = data_params.get("to")
     local_close_df = pd.DataFrame()
     for h in holdings:
         name = h["name"]
@@ -187,7 +187,7 @@ def base_ccy_assets_px_df(holdings, fx_map, params, ohlc=False):
         else:
             # Instrument path
             ticker = h.get("ticker")
-            px_df = f1.fetch_csv_robust(ticker, params=params)
+            px_df = f1.fetch_csv_robust(ticker, data_params=data_params)
 
             if ohlc:
                 # Use unadjusted OHLC consistently

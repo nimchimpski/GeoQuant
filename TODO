@@ -1,3 +1,5 @@
+KEEP THE DATA_PARAMS DICT as it means 5 variables can be passed in a dict, which is only defined once.
+
 -make f2 complete fn for fetch and deliver chf price series' df
 
 - sharpe???

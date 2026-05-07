@@ -27,7 +27,7 @@ importlib.reload(config)
 
 def build_returns_weights(
     holdings: list[dict],
-    params: dict = {},
+    data_params: dict = {},
     window_start: str = None,
     window_end: str = None,
     no_fx: bool = False,
@@ -60,7 +60,7 @@ def build_returns_weights(
             raise ValueError("window_start must be before window_end")
 
     
-    fx_map = portfolio.make_fx_map(holdings, params, no_fx, usd_shift)
+    fx_map = portfolio.make_fx_map(holdings, data_params, no_fx, usd_shift)
 
 
     # ------------BUILD CHF CLOSE SERIES PER ASSET-------------------
@@ -77,7 +77,7 @@ def build_returns_weights(
             asset_close_local_s = portfolio.cash_series(ccy, fx_map)
         else:
             ticker   = h.get("ticker")
-            px_df = f1.fetch_csv_robust(ticker, params=params)
+            px_df = f1.fetch_csv_robust(ticker, data_params=data_params)
             print(px_df.tail(20))
             asset_close_local_s = f1.sort_cols(px_df, ohlc)
 
