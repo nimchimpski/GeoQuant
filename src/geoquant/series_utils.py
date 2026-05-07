@@ -24,7 +24,9 @@ def standardize_fx_daily_index(s: pd.Series) -> pd.Series:
     return s
 
 # function to trim series to specified dates
-def trim_series(s: pd.Series, start: str, end: str=None) -> pd.Series:
+def trim_series(s: pd.Series, data_params: dict, end: str=None) -> pd.Series:
+    start = data_params.get('start')
+    end = data_params.get('end')
     if start:
         s = s[s.index >= pd.to_datetime(start)]
     if end:

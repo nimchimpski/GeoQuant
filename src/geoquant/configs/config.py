@@ -2,6 +2,7 @@
 import os
 import pathlib
 import yaml
+import pandas as pd
 
 from dotenv import load_dotenv
 import time
@@ -13,7 +14,6 @@ from pathlib import Path
 load_dotenv(dotenv_path=Path(__file__).parent / ".env")
 
 STOOQ_API = os.environ.get("STOOQ_API")
-
 print(f"STOOQ_API: {STOOQ_API}")
 
 
@@ -26,18 +26,11 @@ PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[2]
 CACHE_DIR =  pathlib.Path(__file__).parent / "cache"
 CACHE_DIR.mkdir(exist_ok=True)
 
-
-START = config["START"]
-DATASOURCE = config["DATASOURCE"]
-MAX_AGE = config["MAX_AGE"]
-END = config.get("END", time.strftime("%Y-%m-%d"))
-
 data_params = {
-    'start': START,
-    'datasource': DATASOURCE,
-    'max_age': MAX_AGE,
-    'end': END
-
+    'start': pd.to_datetime(config["START"]),
+    'datasource': config["DATASOURCE"],
+    'max_age': config["MAX_AGE"],
+    'end': pd.to_datetime(config.get("END") or time.strftime("%Y-%m-%d"))
 }
 # Module-level debug flag (no new function args). Set RISK_DEBUG=1 in env to enable verbose diagnostics.
 DEBUG = True

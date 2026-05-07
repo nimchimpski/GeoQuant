@@ -38,7 +38,7 @@ def build_returns_weights(
     Build CHF daily returns matrix for the provided holdings.
         holdings: list of dicts with tickers:
       - name: row/column label in outputs
-      - ticker: EODHD tickerbol (e.g., 'SWDA.LON', 'IBM')
+      - ticker: dependent on datasource. EODHD 'SWDA.LON/US'. stoooq 'SWDA.LSE/US'. For cash, omit ticker and set type='cash' and ccy.
       - ccy: base currency of the asset price series (GBP/USD/EUR/CHF)
       - gbx: bool; if True, divide close by 100.0 (LSE pence)
       - position: number of shares held (float)
@@ -49,19 +49,9 @@ def build_returns_weights(
       prices_df: DataFrame of CHF closes, T x N
       weights: Series aligned to columns in rets_df
     """
-    # SORT WINDOW DATES
-    if window_end is None:
-        window_end = pd.to_datetime(datetime.now().strftime('%Y-%m-%d'))
-    else:
-        window_end = pd.to_datetime(window_end)
-    if window_start is not None:
-        window_start = pd.to_datetime(window_start)
-        if window_start >= window_end:
-            raise ValueError("window_start must be before window_end")
+    print('++++++ build_returns_weights()')
 
-    
     fx_map = portfolio.make_fx_map(holdings, data_params, no_fx, usd_shift)
-
 
     # ------------BUILD CHF CLOSE SERIES PER ASSET-------------------
     assets_close_local_df = pd.DataFrame()
@@ -83,7 +73,7 @@ def build_returns_weights(
 
             # *********** DEBUG PLOTTING ***************
             sa = asset_close_local_s
-            sx = f2.trim_series(sa, "2025-10-20",)
+            sx = f2.trim_series(sa, data_params)
             print('px local earliest date', sx.index[0].date())
             print('px local latest', sx.iloc[-1])
             print(sx.tail)
@@ -158,16 +148,15 @@ def build_returns_weights(
     # ALIGN ON COMMON DATES AND RESTRICT TO LOOKBACK WINDOW
     prices_df = assets_close_chf_df.dropna(how="any")   
     
-    prices_df = f2.trim_series(prices_df, window_start, window_end)
+    prices_df = f2.trim_series(prices_df, data_params)
     rets_df = np.log(prices_df / prices_df.shift(1)).dropna()
-    if window_start or window_end:
-        window = window_end - window_start
-        # convert window to int
-        if prices_df.shape[0] < (window.days * 0.73):
-            print(
-                f"After alignment only {prices_df.shape[0]} rows remain "
-                f"(expected {window}). Data source may not have full history."
-            )
+    window = data_params['end'] -  data_params['start']
+    # convert window to int
+    if prices_df.shape[0] < (window.days * 0.73):
+        print(
+            f"After alignment only {prices_df.shape[0]} rows remain "
+            f"(expected {window}). Data source may not have full history."
+        )
     
     if rets_df.isna().any().any():
         raise ValueError("NaNs remained in returns after shift/drop; check data alignment.")
@@ -189,7 +178,8 @@ def build_returns_weights(
             chf_values[name] = chf_value
         
     total_val = sum(chf_values.values())
-    print(f'LOOKBACK DAYS/REGIME: {window_start} to {window_end}  ({(window_end - window_start).days} days)')
+    
+    print(f'LOOKBACK DAYS/REGIME: {data_params["start"]} to {data_params["end"]}  ({(data_params["end"] - data_params["start"]).days} days)')
     print(f"Total portfolio value (CHF): {total_val:.2f}")
 
     # CALCULATE WEIGHTS (CHF)

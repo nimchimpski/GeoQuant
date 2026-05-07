@@ -107,7 +107,11 @@ def get_holding_value_chf(h: dict, fx_map: dict, assets_close_local_df: pd.DataF
                 if fx.empty:
                     raise KeyError(f"Missing FX series {pair} for cash {name}")
                 # ALIGN FX TO PORTFOLIO AS-OF DATE AND FFILL FX ONLY
-                last_fx = fx.reindex([asof]).ffill().iloc[-1]
+                # Use last available FX rate on or before asof (robust to index type)
+                try:
+                    last_fx = fx.loc[:asof].iloc[-1]
+                except IndexError:
+                    raise ValueError(f"FX {pair} has no value on/before {asof} for cash {name}")
                 if np.isnan(last_fx):
                     raise ValueError(f"FX {pair} has no value on/before {asof} for cash {name}")
                 return float(h['amount']) * float(last_fx)

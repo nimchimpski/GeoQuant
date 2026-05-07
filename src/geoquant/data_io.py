@@ -387,7 +387,7 @@ def fetch_csv_robust(ticker: str,data_params: dict=None, force_refresh: bool = F
       - atomic write on success.
         Returns a parsed DataFrame (index on first column).
         """
-    print('+++fetch_csv_robust : config/data_params:', data_params)
+    print(f'+++fetch_csv_robust : {ticker}, config/data_params:', data_params)
 
     start =data_params['start']
     datasource =data_params['datasource']
