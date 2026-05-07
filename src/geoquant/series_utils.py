@@ -3,8 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import Tuple
 
-from config import params
-import scripts.data_io as f1
+from geoquant.configs.config import params
+import geoquant.data_io as f1
 
 
 def _log_returns(s: pd.Series) -> pd.Series:

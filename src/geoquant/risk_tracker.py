@@ -22,10 +22,10 @@ for _p in [_ROOT, os.path.join(_ROOT, 'scripts')]:
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from books import IBKR_live, computershare, AJBell
-from scenario_configs import GEO_ESCALATION
-from data_io import compute_nav
-from config import params as _BASE_PARAMS
+from src.geoquant.books import IBKR_live, computershare, AJBell
+from rename.scenario_configs import GEO_ESCALATION
+from geoquant.data_io import compute_nav
+from geoquant.configs.config import params as _BASE_PARAMS
 
 # ─────────────────────────────────────────────
 # FETCH LIVE NAV FROM BOOKS

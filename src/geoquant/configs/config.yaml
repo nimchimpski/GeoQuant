@@ -6,6 +6,5 @@ URL : "https://stooq.com/q/d/l/?s=ulvr.uk&d1=20180101&d2=20260307&i=d"
 params : {  'from': START, 
             'to': today,
             'api_token': EOD_API    }
-url : URL
 MAX_AGE : 24
 today : time.strftime("%Y-%m-%d")

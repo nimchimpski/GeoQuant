@@ -1,9 +1,9 @@
 import pandas as pd
 import numpy as np
 
-from config import *
-import scripts.data_io as f1
-import scripts.series_utils as series_utils
+from geoquant.configs.config import *
+import geoquant.data_io as f1
+import geoquant.series_utils as series_utils
 
 
 def norm_risk_fx(val) -> bool:

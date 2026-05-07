@@ -3,7 +3,7 @@ import pandas as pd
 from typing import Callable, Iterable, Tuple
 import itertools
 
-import scripts.series_utils as series_utils
+import geoquant.series_utils as series_utils
 
 def _enforce_min_run(gate: pd.Series, min_run: int) -> pd.Series:
     """

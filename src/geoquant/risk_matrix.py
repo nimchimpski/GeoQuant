@@ -13,11 +13,11 @@ import seaborn as sns
 
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
-import config
-import scripts.series_utils as f2
-import scripts.data_io as f1
-import scripts.portfolio as portfolio
-import books
+import geoquant.configs.config as config
+import geoquant.series_utils as f2
+import geoquant.data_io as f1
+import geoquant.portfolio as portfolio
+import geoquant.books as books
 
 # print(holdings.IBKR_live)
 

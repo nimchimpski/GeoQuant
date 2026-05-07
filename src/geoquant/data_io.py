@@ -7,7 +7,7 @@ import pathlib
 import requests
 import pandas as pd
 from datetime import datetime, timezone, timedelta
-from config import *
+from geoquant.configs.config import *
 
 
 def cache_path( ticker: str) -> pathlib.Path:
