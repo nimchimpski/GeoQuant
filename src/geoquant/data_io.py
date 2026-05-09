@@ -379,7 +379,7 @@ def url_builder(datasource: str, ticker: str,data_params: dict) -> str:
     # Backward-compatible wrapper; keep callers stable while using one implementation.
     return build_url(datasource, ticker,data_params)
 
-def fetch_csv_robust(ticker: str,data_params: dict=None, force_refresh: bool = False) -> pd.DataFrame:
+def fetch_csv(ticker: str,data_params: dict=None, force_refresh: bool = False) -> pd.DataFrame:
     """
         Robust CSV fetch with:
       - on-disk cache (TTL),
@@ -387,7 +387,7 @@ def fetch_csv_robust(ticker: str,data_params: dict=None, force_refresh: bool = F
       - atomic write on success.
         Returns a parsed DataFrame (index on first column).
         """
-    print(f'+++fetch_csv_robust : {ticker}, config/data_params:', data_params)
+    print(f'+++fetch_csv : {ticker}, config/data_params:', data_params)
 
     start =data_params['start']
     datasource =data_params['datasource']
@@ -545,7 +545,7 @@ def _latest_fx_rate(ccy: str, data_params: dict) -> float:
     ticker = _FX_TICKERS.get(ccy)
     if ticker is None:
         raise ValueError(f"No FX ticker configured for currency: {ccy}")
-    df = fetch_csv_robust(ticker, data_params)
+    df = fetch_csv(ticker, data_params)
     return float(sort_cols(df).dropna().iloc[-1])
 
 
@@ -594,7 +594,7 @@ def compute_nav(books: list, data_params: dict) -> dict:
                 if not ticker or n_units == 0:
                     position_values[name] = 0.0
                     continue
-                df = fetch_csv_robust(ticker, data_params)
+                df = fetch_csv(ticker, data_params)
                 close = float(sort_cols(df).dropna().iloc[-1])
                 if entry.get('gbx', False):
                     close = close / 100.0   # pence → GBP

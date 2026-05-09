@@ -25,6 +25,8 @@ importlib.reload(books)
 importlib.reload(f2)
 importlib.reload(config)
 
+
+
 def build_returns_weights(
     holdings: list[dict],
     data_params: dict = {},
@@ -33,6 +35,7 @@ def build_returns_weights(
     no_fx: bool = False,
     usd_shift: bool = False,
     ohlc: bool = False,
+    target_weights: dict = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
     """
     Build CHF daily returns matrix for the provided holdings.
@@ -56,9 +59,11 @@ def build_returns_weights(
     # ------------BUILD CHF CLOSE SERIES PER ASSET-------------------
     assets_close_local_df = pd.DataFrame()
     assets_close_chf_df = pd.DataFrame()
-
+    # print('===========building price series df===============')
     for h in holdings:
         name = h['name']
+        # print(f'--------holdings-loop-{name}--------')
+
   
         # print(f'>>>>>>>>>>>>>> Processing {name} >>>>>>>>')
         ccy   = h["ccy"].upper()
@@ -67,40 +72,41 @@ def build_returns_weights(
             asset_close_local_s = portfolio.cash_series(ccy, fx_map)
         else:
             ticker   = h.get("ticker")
-            px_df = f1.fetch_csv_robust(ticker, data_params=data_params)
-            print(px_df.tail(20))
+            px_df = f1.fetch_csv(ticker, data_params=data_params)
+            # print(px_df.tail(1))
             asset_close_local_s = f1.sort_cols(px_df, ohlc)
 
             # *********** DEBUG PLOTTING ***************
-            sa = asset_close_local_s
-            sx = f2.trim_series(sa, data_params)
-            print('px local earliest date', sx.index[0].date())
-            print('px local latest', sx.iloc[-1])
-            print(sx.tail)
-            # CHECK FOR LARGE GAPS IN DATA
-            date_diffs = sx.index.to_series().diff().dt.days.dropna()
-            max_gap = date_diffs.max()
-            print(f'Max data gap (days) for {name}: {max_gap}')
-            r = sx.pct_change()
-            print('r, r*100 ', r.std(), (r*100).std()  )
+            # sa = asset_close_local_s
+            # sx = f2.trim_series(sa, data_params)
+            # print('px local earliest date', sx.index[0].date())
+            # print('px local latest', sx.iloc[-1])
+            # print(sx.tail)
+            # # CHECK FOR LARGE GAPS IN DATA
+            # date_diffs = sx.index.to_series().diff().dt.days.dropna()
+            # max_gap = date_diffs.max()
+            # print(f'Max data gap (days) for {name}: {max_gap}')
+            # r = sx.pct_change()
+            # print('r, r*100 ', r.std(), (r*100).std()  )
 
-            # PLOT
-            fig, ax = plt.subplots(figsize=(10,4))
-            ax.plot(sx.index, sx, label=f'{name} local close')
-            # Formatter: month-day only
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
+            # # PLOT
+            # fig, ax = plt.subplots(figsize=(10,4))
+            # ax.plot(sx.index, sx, label=f'{name} local close')
+            # # Formatter: month-day only
+            # ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
 
-            ax.xaxis.set_major_locator(mdates.AutoDateLocator())
-            plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
+            # ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+            # plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
 
-            plt.tight_layout()
+            # plt.tight_layout()
 
-            plt.title(f'{name} local close price series')
-            plt.xlabel('Date')
-            plt.ylabel('Price')
-            plt.legend()
-            plt.grid()
-            plt.show()
+            # plt.title(f'{name} local close price series')
+            # plt.xlabel('Date')
+            # plt.ylabel('Price')
+            # plt.legend()
+            # plt.grid()
+            # plt.show()
+
 
 
 
@@ -115,12 +121,12 @@ def build_returns_weights(
 
         # DECIDE IF TO REMOVE FX VOL IN RETURNS
         include_fx_vol_bool = h.get('include_fx_vol', True)
-        if include_fx_vol_bool == False:
-            print(f"Removing FX vol for {name} ({ccy}), is this hedged?")
+        # if include_fx_vol_bool == False:
+            # print(f"Removing FX vol for {name} ({ccy}), is this hedged?")
         if ccy == 'CHF' or no_fx or (not include_fx_vol_bool) or h.get('type','').lower()=='cash':
             # print(f'No FX conversion for {name} ({ccy})')
             asset_close_chf_s = asset_close_local_s.rename(name)
-            print('chf equiv latest', asset_close_chf_s.iloc[-1])
+            # print('>chf equiv latest', asset_close_chf_s.iloc[-1])
         else:
             # OTHERWISE INCLUDE FX VOL
             # print(f'Converting {name} from {ccy} to CHF')
@@ -134,7 +140,7 @@ def build_returns_weights(
 
             # print(f'CHF close last for {name}: {asset_close_chf_s.iloc[-1]}')
         assets_close_chf_df[name] = asset_close_chf_s
-
+    # print('===========df built===============\n')
     # ---------HEDGED CASH---------
     hedged_cash = [
         h['name'] for h in holdings
@@ -182,23 +188,34 @@ def build_returns_weights(
     print(f'LOOKBACK DAYS/REGIME: {data_params["start"]} to {data_params["end"]}  ({(data_params["end"] - data_params["start"]).days} days)')
     print(f"Total portfolio value (CHF): {total_val:.2f}")
 
-    # CALCULATE WEIGHTS (CHF)
-    weights = pd.Series()
-    for h in holdings:
-        name = h["name"]
-        size = h.get('position', 0.0)
-        value = float(chf_values[name])
-        weight = value / total_val
-        weights[name] = weight
 
-        # JUST FOR THE PRINTING
-        last = assets_close_local_df[name].iloc[-2]
-
-        print(f"{name}: value CHF{value:.2f},  last {last:.2f} *fx* {size}")
-
-
-    if not np.isclose(weights.sum(), 1.0, atol=1e-6):
-        raise ValueError(f"Weights must sum to 1. Got {weights.sum():.6f}" "check postions input in holdings.")
+    # CALCULATE WEIGHTS (user-specified or value-based)
+    if target_weights is not None:
+        # Use user-specified weights (should sum to 1.0)
+        weights = pd.Series(dtype=float)
+        for h in holdings:
+            name = h["name"]
+            if name in target_weights:
+                weights[name] = target_weights[name]
+            else:
+                weights[name] = 0.0
+        if not np.isclose(weights.sum(), 1.0, atol=1e-6):
+            raise ValueError(f"Target weights must sum to 1. Got {weights.sum():.6f}")
+        for name, weight in weights.items():
+            value = float(chf_values.get(name, 0.0))
+            print(f"{name}: target weight {weight:.2%}, value CHF{value:.2f}")
+    else:
+        weights = pd.Series()
+        for h in holdings:
+            name = h["name"]
+            size = h.get('position', 0.0)
+            value = float(chf_values[name])
+            weight = value / total_val
+            weights[name] = weight
+            last = assets_close_local_df[name].iloc[-2]
+            print(f"{name}: value CHF{value:.2f},  last {last:.2f} *fx* {size}")
+        if not np.isclose(weights.sum(), 1.0, atol=1e-6):
+            raise ValueError(f"Weights must sum to 1. Got {weights.sum():.6f}" "check postions input in holdings.")
     return rets_df, prices_df, weights
 
 

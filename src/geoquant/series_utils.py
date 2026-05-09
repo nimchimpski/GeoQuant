@@ -40,7 +40,7 @@ def get_window_dates(s: pd.Series) -> Tuple[pd.Timestamp, pd.Timestamp]:
 
 # def get_series1(ticker, params=config.params, window_start=None, window_end=None) -> pd.Series:
 #     print(f'++++ get_series{ticker}')
-#     s= f1.fetch_csv_robust(params=params, ticker=ticker)
+#     s= f1.fetch_csv(params=params, ticker=ticker)
 #     s = f1.sort_cols(s)
 #     s = f2.standardize_fx_daily_index(s)
 #     s = trim_series(s, window_start, window_end)
@@ -48,7 +48,7 @@ def get_window_dates(s: pd.Series) -> Tuple[pd.Timestamp, pd.Timestamp]:
 
 def get_series(ticker, window_start=None, window_end=None) -> pd.Series:
     print(f'++++ get_series{ticker}')
-    s = f1.fetch_csv_robust(ticker=ticker, params=params)
+    s = f1.fetch_csv(ticker=ticker, params=params)
     s = f1.sort_cols(s)
     s = standardize_fx_daily_index(s)
     s = trim_series(s, window_start, window_end)

@@ -35,7 +35,7 @@ def make_fx_map(holdings, data_params, usd_shift=True, ohlc=False) -> dict[str, 
     for ccy in needed_ccy:
         ticker = f'{ccy}CHF.FOREX'
         # Fetch EODHD daily FX and build a Series
-        fx_df = f1.fetch_csv_robust(data_params=data_params, ticker=ticker)
+        fx_df = f1.fetch_csv(data_params=data_params, ticker=ticker)
         # Normalize and pick close
         fx_s = f1.sort_cols(fx_df, ohlc)
         if not ohlc:
@@ -191,7 +191,7 @@ def base_ccy_assets_px_df(holdings, fx_map, data_params, ohlc=False):
         else:
             # Instrument path
             ticker = h.get("ticker")
-            px_df = f1.fetch_csv_robust(ticker, data_params=data_params)
+            px_df = f1.fetch_csv(ticker, data_params=data_params)
 
             if ohlc:
                 # Use unadjusted OHLC consistently
