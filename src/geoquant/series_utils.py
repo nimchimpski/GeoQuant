@@ -1,29 +1,29 @@
 
 import logging
 import pandas as pd
+logger = logging.getLogger(__name__)
 
 def check_spikes(series: pd.Series, max_logret: float = 0.07, top_n: int = 10, plot: bool = False, name: str = None):
     """
     Check for spikes in a price series by log return threshold.
     Prints the top N absolute log returns and optionally plots them.
-    Logs at INFO level that the check was performed and whether it passed or failed.
+    Logs at DEBUG level that the check was performed and whether it passed or failed.
     """
-    logger = logging.getLogger(__name__)
     label = name or getattr(series, 'name', 'series')
     rets = np.log(series / series.shift(1))
     spikes = rets.abs().sort_values(ascending=False).head(top_n)
-    logger.info(f"Spike check: {label} (top {top_n}, threshold {max_logret})")
+    logger.debug(f"Spike check: {label} (top {top_n}, threshold {max_logret})")
     flagged = spikes[spikes.abs() > max_logret]
     if not flagged.empty:
-        logger.info(f"Spike check FAILED for {label}: {len(flagged)} spikes exceed threshold {max_logret}")
+        logger.error(f"Spike check FAILED for {label}: {len(flagged)} spikes exceed threshold {max_logret}")
     else:
-        logger.info(f"Spike check PASSED for {label}: No spikes exceed threshold.")
-    print(f"Top {top_n} spikes for {label} (|log return| > {max_logret}):")
-    print(spikes)
+        logger.debug(f"Spike check PASSED for {label}: No spikes exceed threshold.")
+    logger.debug(f"Top {top_n} spikes for {label} (|log return| > {max_logret}):")
+    logger.debug(spikes)
     if not flagged.empty:
-        print(f"WARNING: {len(flagged)} spikes exceed threshold {max_logret}")
+        logger.warning(f"{len(flagged)} spikes exceed threshold {max_logret}")
     else:
-        print("No spikes exceed threshold.")
+        logger.debug("No spikes exceed threshold.")
     if plot:
         plt.figure(figsize=(12, 2))
         plt.plot(rets.index, rets, label="Log returns")

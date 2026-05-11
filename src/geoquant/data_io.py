@@ -40,8 +40,8 @@ def check_start_date(df, ticker: str, start: str, ) -> None:
     earliest = df.index.min().date()
     gap = (earliest - pd.to_datetime(start).date()).days
     if gap > 3:
-        logger.info(f'{ticker} gap days: {gap}')
-        logger.info(f'{ticker} required start: {start}\n {ticker} data start: {earliest}')
+        # format date to only show date part
+        logger.info(f'  {ticker} gap days: {gap}, required start: {pd.to_datetime(start).date()}\n data start: {earliest}, ')
 
 
 def _normalize_ohlc_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -73,6 +73,45 @@ def _normalize_ohlc_columns(df: pd.DataFrame) -> pd.DataFrame:
     if c_adj:   rename[c_adj]   = "Adjusted_close"
     out = out.rename(columns=rename)
     return out
+
+
+def _repair_close_points(
+    df: pd.DataFrame,
+    repair_days: pd.DatetimeIndex,
+    *,
+    update_ohlc: bool,
+    update_adjusted: bool,
+) -> tuple[pd.DataFrame, list]:
+    """Repair selected dates by interpolating Close and optionally mirroring to OHLC."""
+    if len(repair_days) == 0:
+        return df, []
+
+    cleaned = df.copy()
+    close = pd.to_numeric(cleaned["Close"], errors="coerce")
+    repaired = close.copy()
+    changes: list = []
+
+    for dt in repair_days:
+        if dt in repaired.index:
+            old = repaired.loc[dt]
+            repaired.loc[dt] = pd.NA
+            changes.append((dt, old))
+
+    repaired = repaired.astype("float64").interpolate(method="time", limit_direction="both", limit=5).bfill().ffill()
+
+    cleaned.loc[repair_days, "Close"] = repaired.loc[repair_days].values
+    if update_ohlc:
+        if "Open" in cleaned.columns:
+            cleaned.loc[repair_days, "Open"] = repaired.loc[repair_days].values
+        if "High" in cleaned.columns:
+            cleaned.loc[repair_days, "High"] = repaired.loc[repair_days].values
+        if "Low" in cleaned.columns:
+            cleaned.loc[repair_days, "Low"] = repaired.loc[repair_days].values
+    if update_adjusted and "Adjusted_close" in cleaned.columns:
+        cleaned.loc[repair_days, "Adjusted_close"] = repaired.loc[repair_days].values
+
+    changes = [(dt, float(old), float(cleaned.loc[dt, "Close"])) for (dt, old) in changes]
+    return cleaned, changes
 
 def clean_ohlc_flatbar_spikes(df: pd.DataFrame, *, ret_spike: float = 0.10, eps: float = 1e-6,
                               update_adjusted: bool = True) -> tuple[pd.DataFrame, list]:
@@ -125,47 +164,36 @@ def clean_ohlc_flatbar_spikes(df: pd.DataFrame, *, ret_spike: float = 0.10, eps:
     if len(spike_days) == 0:
         return out, []
 
-    # Interpolate Close on spike days
-    cleaned = out.copy()
-    changes: list = []
-    s = close.copy()
-    for dt in spike_days:
-        if dt in s.index:
-            old = s.loc[dt]
-            s.loc[dt] = pd.NA
-            changes.append((dt, old))
-
-    s = s.astype("float64").interpolate(method="time", limit=2).bfill().ffill()
-
-    # Apply repaired Close and propagate to O/H/L for flagged days
-    cleaned.loc[spike_days, "Close"] = s.loc[spike_days].values
-    if "Open" in cleaned.columns:
-        cleaned.loc[spike_days, "Open"] = s.loc[spike_days].values
-    if "High" in cleaned.columns:
-        cleaned.loc[spike_days, "High"] = s.loc[spike_days].values
-    if "Low" in cleaned.columns:
-        cleaned.loc[spike_days, "Low"] = s.loc[spike_days].values
-    if update_adjusted and "Adjusted_close" in cleaned.columns:
-        cleaned.loc[spike_days, "Adjusted_close"] = s.loc[spike_days].values
-
-    # Build change records with new values
-    changes = [(dt, float(old), float(cleaned.loc[dt, "Close"])) for (dt, old) in changes]
-    return cleaned, changes
+    return _repair_close_points(
+        out,
+        spike_days,
+        update_ohlc=True,
+        update_adjusted=update_adjusted,
+    )
 
 
-def clean_spike_revert(df: pd.DataFrame, *, ret_spike: float = 0.15) -> tuple[pd.DataFrame, list]:
-    """Remove spike-and-revert bad prints from vendor data.
+def clean_spike_revert(
+    df: pd.DataFrame,
+    *,
+    ret_spike: float = 0.15,
+    settle_logret: float = 0.05,
+    plateau_logret: float = 0.05,
+    update_adjusted: bool = True,
+) -> tuple[pd.DataFrame, list]:
+    """Repair close-only spike-and-revert bad prints.
 
-    Detects days where the close makes a large move that is substantially
-    reversed within the next trading day — the hallmark of a bad vendor print.
+    This is intentionally stricter than a generic outlier check. A date is only
+    repaired when the close jumps away from the prior close and then returns near
+    that prior level within one or two trading days.
 
-    Rule: flag day t if:
-      - |log_ret[t]| >= ret_spike, AND
-      - log_ret[t] and log_ret[t+1] have opposite signs, AND
-      - |log_ret[t+1]| >= 0.5 * |log_ret[t]|  (at least half reversed next day)
+    Two patterns are repaired:
+      - one-day spike: close[t] is far from close[t-1], but close[t+1] is back
+        near close[t-1]
+      - two-day plateau spike: close[t] is far from close[t-1], close[t+1]
+        stays near close[t], and close[t+2] returns near close[t-1]
 
-    The flagged day is repaired by linear time-interpolation of Close (same as
-    the flat-bar cleaner). O/H/L are set equal to the repaired Close.
+    Only Close (and optionally Adjusted_close) is updated. Non-flat OHLC bars
+    are left intact to avoid inventing intraday structure.
 
     Returns: (cleaned_df, changes) where changes is a list of
       (timestamp, old_close, new_close).
@@ -180,51 +208,72 @@ def clean_spike_revert(df: pd.DataFrame, *, ret_spike: float = 0.15) -> tuple[pd
         return out, []
 
     close = pd.to_numeric(out["Close"], errors="coerce")
-    log_ret = np.log(close / close.shift(1))
-    log_ret_next1 = log_ret.shift(-1)
-    log_ret_next2 = log_ret.shift(-2)
+    finite = close.where(close > 0)
+    prev_close = finite.shift(1)
+    next_close1 = finite.shift(-1)
+    next_close2 = finite.shift(-2)
 
-    # Reversal within 1 or 2 days (catches spikes with a "dead cat" day in between)
-    reverts_next1 = (log_ret * log_ret_next1 < 0) & (log_ret_next1.abs() >= 0.5 * log_ret.abs())
-    reverts_next2 = (log_ret * log_ret_next2 < 0) & (log_ret_next2.abs() >= 0.5 * log_ret.abs())
+    log_jump = np.log(finite / prev_close)
+    settle1 = np.log(next_close1 / prev_close).abs() <= float(settle_logret)
+    settle2 = np.log(next_close2 / prev_close).abs() <= float(settle_logret)
+    plateau1 = np.log(next_close1 / finite).abs() <= float(plateau_logret)
 
-    spike_mask = (log_ret.abs() >= ret_spike) & (reverts_next1 | reverts_next2)
+    one_day_revert = log_jump.abs() >= float(ret_spike)
+    one_day_revert &= settle1.fillna(False)
 
-    spike_days = spike_mask[spike_mask.fillna(False)].index
-    # When the reversal is 2 days out the intermediate day is also a bad print — include it
-    idx = out.index
-    extra_days = []
-    for dt in spike_days:
-        pos = idx.get_loc(dt)
-        if pos + 2 < len(idx):
-            mid = idx[pos + 1]
-            revert = idx[pos + 2]
-            if revert in spike_days or (log_ret.get(revert, 0) * log_ret.get(dt, 0) < 0):
-                extra_days.append(mid)
-    all_spike_days = idx[spike_mask.reindex(idx).fillna(False)].union(pd.DatetimeIndex(extra_days))
-    if len(all_spike_days) == 0:
+    two_day_revert = log_jump.abs() >= float(ret_spike)
+    two_day_revert &= plateau1.fillna(False)
+    two_day_revert &= settle2.fillna(False)
+
+    spike_days = one_day_revert[one_day_revert.fillna(False)].index
+    plateau_days = two_day_revert[two_day_revert.fillna(False)].index
+    repair_days = spike_days.union(plateau_days).union(plateau_days + pd.Timedelta(days=1))
+    repair_days = out.index.intersection(repair_days)
+    if len(repair_days) == 0:
         return out, []
 
-    cleaned = out.copy()
-    changes = []
-    s = close.copy()
-    for dt in all_spike_days:
-        old = s.loc[dt]
-        s.loc[dt] = pd.NA
-        changes.append((dt, old))
+    return _repair_close_points(
+        out,
+        repair_days,
+        update_ohlc=False,
+        update_adjusted=update_adjusted,
+    )
 
-    s = s.astype("float64").interpolate(method="time", limit_direction="both", limit=5).bfill().ffill()
 
-    cleaned.loc[all_spike_days, "Close"] = s.loc[all_spike_days].values
-    if "Open" in cleaned.columns:
-        cleaned.loc[all_spike_days, "Open"] = s.loc[all_spike_days].values
-    if "High" in cleaned.columns:
-        cleaned.loc[all_spike_days, "High"] = s.loc[all_spike_days].values
-    if "Low" in cleaned.columns:
-        cleaned.loc[all_spike_days, "Low"] = s.loc[all_spike_days].values
+def clean_price_spikes(
+    df: pd.DataFrame,
+    *,
+    flatbar_ret_spike: float = 0.10,
+    revert_ret_spike: float = 0.15,
+) -> tuple[pd.DataFrame, dict]:
+    """Run all fetch-time spike cleaners and return a structured audit trail."""
+    cleaned, flatbar_changes = clean_ohlc_flatbar_spikes(df, ret_spike=flatbar_ret_spike)
+    cleaned, revert_changes = clean_spike_revert(cleaned, ret_spike=revert_ret_spike)
+    audit = {
+        "flatbar_changes": flatbar_changes,
+        "revert_changes": revert_changes,
+        "total_changes": len(flatbar_changes) + len(revert_changes),
+    }
+    return cleaned, audit
 
-    changes = [(dt, float(old), float(cleaned.loc[dt, "Close"])) for (dt, old) in changes]
-    return cleaned, changes
+
+def _write_cached_csv(path: pathlib.Path, df: pd.DataFrame) -> None:
+    tmp = path.with_suffix(".tmp")
+    df.to_csv(tmp, date_format="%Y-%m-%d")
+    os.replace(tmp, path)
+
+
+def _log_spike_audit(ticker: str, audit: dict, *, source: str) -> None:
+    total_changes = int(audit.get("total_changes", 0))
+    flatbar_changes = audit.get("flatbar_changes", [])
+    revert_changes = audit.get("revert_changes", [])
+    if total_changes:
+        logger.info(
+            f"{ticker} - cleaned {total_changes} spike(s) on {source} "
+            f"({len(flatbar_changes)} flat-bar, {len(revert_changes)} spike-revert)"
+        )
+    else:
+        logger.debug(f"{ticker} - no auto-fixable spikes detected on {source}")
 
 
 # Step 1: any known suffix → canonical exchange name.
@@ -486,19 +535,12 @@ def fetch_csv(ticker: str,data_params: dict=None, force_refresh: bool = False) -
         logger.debug(f"{ticker} - using cached data (no refresh)")
         df_cached = pd.read_csv(path, header=0, parse_dates=[0], index_col=0).sort_index()
         check_start_date(df_cached, ticker, start)
-        # spike check cached data
-        cleaned, changes = clean_ohlc_flatbar_spikes(df_cached, ret_spike=0.10)
-        cleaned, changes2 = clean_spike_revert(cleaned, ret_spike=0.15)
-        all_changes = changes + changes2
-        logger.info(f"changes: {all_changes}")
-        if all_changes:
-            logger.info(f"{ticker} - cleaned {len(all_changes)} spike(s) in cached data - rewriting cache")
-            tmp = path.with_suffix(".tmp")
-            cleaned.to_csv(tmp, date_format="%Y-%m-%d")
-            os.replace(tmp, path)
+        cleaned, audit = clean_price_spikes(df_cached)
+        if audit["total_changes"]:
+            _log_spike_audit(ticker, audit, source="cached data")
+            _write_cached_csv(path, cleaned)
             return cleaned
-        else:
-            logger.info(f"  {ticker} - no spikes detected in cached data")
+        _log_spike_audit(ticker, audit, source="cached data")
         return df_cached
 
     # If cache does not exist, download and cache
@@ -513,19 +555,12 @@ def fetch_csv(ticker: str,data_params: dict=None, force_refresh: bool = False) -
     data_params_full['start'] = start
     data_params_full['end'] = end
     df_raw = _download_csv_frame(build_url(datasource, ticker, data_params_full), ticker)
-    cleaned, changes = clean_ohlc_flatbar_spikes(df_raw, ret_spike=0.10)
-    cleaned, changes2 = clean_spike_revert(cleaned, ret_spike=0.15)
-    all_changes = changes + changes2
-    if all_changes:
-        logger.info(f"{ticker} - cleaned {len(all_changes)} spike(s) on download ({len(changes)} flat-bar, {len(changes2)} spike-revert)")
-    else:
-        logger.info(f"{ticker} - no spikes detected on download")
+    cleaned, audit = clean_price_spikes(df_raw)
+    _log_spike_audit(ticker, audit, source="download")
     df_to_save = cleaned
 
     # Atomic write of merged frame.
-    tmp = path.with_suffix(".tmp")
-    df_to_save.to_csv(tmp, date_format="%Y-%m-%d")
-    os.replace(tmp, path)
+    _write_cached_csv(path, df_to_save)
 
     # Persist refresh metadata
     now_iso = _utc_now_iso()

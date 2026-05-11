@@ -35,12 +35,11 @@ logger = logging.getLogger(__name__)
 def build_returns_weights(
     holdings: list[dict],
     data_params: dict = {},
-    window_start: str = None,
-    window_end: str = None,
     no_fx: bool = False,
     usd_shift: bool = False,
     ohlc: bool = False,
-    target_weights: dict = None,
+    use_target_weights: bool = False,
+    include_cash: bool = False,
     plot_spikes: bool = False,
 
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
@@ -55,11 +54,18 @@ def build_returns_weights(
       - include_fx_vol: bool; when False, strip FX volatility (i.e., hedged in risk). When True or missing, include FX volatility.
 
         Returns:
-      rets_df: DataFrame of CHF log returns, T x N
-      prices_df: DataFrame of CHF closes, T x N
-      weights: Series aligned to columns in rets_df
+            rets_df: DataFrame of CHF log returns, T x N (cash excluded by default)
+            prices_df: DataFrame of CHF closes, T x N (cash excluded by default)
+            weights: Series aligned to columns in rets_df
+            when use_target_weights=True, weights come from holding['target_weight']
     """
     logger.debug('++++++ build_returns_weights()')
+
+    risk_holdings = holdings if include_cash else [
+        h for h in holdings if h.get('type', '').lower() != 'cash'
+    ]
+    if len(risk_holdings) == 0:
+        raise ValueError("No non-cash holdings available for risk calculation.")
 
     fx_map = portfolio.make_fx_map(holdings, data_params, no_fx, usd_shift)
 
@@ -67,7 +73,7 @@ def build_returns_weights(
     assets_close_local_df = pd.DataFrame()
     assets_close_chf_df = pd.DataFrame()
     logger.debug('===========building price series df===============')
-    for h in holdings:
+    for h in risk_holdings:
         name = h['name']
         logger.debug(f'--------holdings-loop-{name}--------')
 
@@ -83,11 +89,8 @@ def build_returns_weights(
             logger.debug(px_df.tail(1))
             asset_close_local_s = f1.sort_cols(px_df, ohlc)
 
-
-            # Spike check after loading and trimming series
             sa = asset_close_local_s
             sx = f2.trim_series(sa, data_params)
-            f2.check_spikes(sx, max_logret=0.07, top_n=10, plot=False, name=name)
 
             logger.debug('px local earliest date', sx.index[0].date())
             logger.debug('px local latest', sx.iloc[-1])
@@ -146,13 +149,14 @@ def build_returns_weights(
         assets_close_chf_df[name] = asset_close_chf_s
     logger.debug('===========df built===============\n')
     # ---------HEDGED CASH---------
-    hedged_cash = [
-        h['name'] for h in holdings
-        if h.get('type','').lower() == 'cash' and h.get('include_fx_vol')
-    ]
-    for n in hedged_cash:
-        if n in assets_close_chf_df.columns:
-            assets_close_chf_df[n] = 1.0
+    if include_cash:
+        hedged_cash = [
+            h['name'] for h in holdings
+            if h.get('type','').lower() == 'cash' and h.get('include_fx_vol')
+        ]
+        for n in hedged_cash:
+            if n in assets_close_chf_df.columns:
+                assets_close_chf_df[n] = 1.0
 
 
     # ALIGN ON COMMON DATES AND RESTRICT TO LOOKBACK WINDOW
@@ -165,7 +169,7 @@ def build_returns_weights(
     if prices_df.shape[0] < (window.days * 0.73):
         logger.info(
             f"After alignment only {prices_df.shape[0]} rows remain "
-            f"(expected {window}). Data source may not have full history."
+            f"(expected {window.days}). Data source may not have full history."
         )
     
     if rets_df.isna().any().any():
@@ -177,7 +181,7 @@ def build_returns_weights(
     # GET CHF VALUE FOR EACH HOLDING (valuation always in CHF at as-of)
     chf_values = {}
     asof = prices_df.index[-1]
-    for h in holdings:
+    for h in risk_holdings:
         name = h['name']
         size = h.get('position', 0.0)
 
@@ -189,28 +193,34 @@ def build_returns_weights(
         
     total_val = sum(chf_values.values())
     
-    logger.info(f'LOOKBACK DAYS/REGIME: {data_params["start"]} to {data_params["end"]}  ({(data_params["end"] - data_params["start"]).days} days)')
+    logger.info(f'LOOKBACK DAYS/REGIME: {pd.to_datetime(data_params["start"]).date()} to {pd.to_datetime(data_params["end"]).date()}  ({(pd.to_datetime(data_params["end"]) - pd.to_datetime(data_params["start"])).days} days)')
     logger.debug(f"Total portfolio value (CHF): {total_val:.2f}")
 
 
-    # CALCULATE WEIGHTS (user-specified or value-based)
-    if target_weights is not None:
-        # Use user-specified weights (should sum to 1.0)
+    # CALCULATE WEIGHTS (book target weights or value-based)
+    if use_target_weights:
+        target_weights = books.extract_target_weights(risk_holdings)
+        # Use target weights from the book (should sum to 1.0)
         weights = pd.Series(dtype=float)
-        for h in holdings:
+        for h in risk_holdings:
             name = h["name"]
             if name in target_weights:
                 weights[name] = target_weights[name]
             else:
                 weights[name] = 0.0
+        if not include_cash:
+            wsum = float(weights.sum())
+            if wsum <= 0:
+                raise ValueError("Non-cash target weights must sum to a positive value.")
+            weights = weights / wsum
         if not np.isclose(weights.sum(), 1.0, atol=1e-6):
-            raise ValueError(f"Target weights must sum to 1. Got {weights.sum():.6f}")
+            raise ValueError(f"Book target weights must sum to 1. Got {weights.sum():.6f}")
         for name, weight in weights.items():
             value = float(chf_values.get(name, 0.0))
             logger.info(f"{name}: target weight {weight:.2%}, value CHF{value:.2f}")
     else:
         weights = pd.Series()
-        for h in holdings:
+        for h in risk_holdings:
             name = h["name"]
             size = h.get('position', 0.0)
             value = float(chf_values[name])
