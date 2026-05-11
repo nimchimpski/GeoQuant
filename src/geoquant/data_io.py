@@ -5,6 +5,7 @@ import json
 import hashlib
 import pathlib
 import requests
+import numpy as np
 import pandas as pd
 from datetime import datetime, timezone, timedelta
 from geoquant.configs.config import *
@@ -150,6 +151,81 @@ def clean_ohlc_flatbar_spikes(df: pd.DataFrame, *, ret_spike: float = 0.10, eps:
     # Build change records with new values
     changes = [(dt, float(old), float(cleaned.loc[dt, "Close"])) for (dt, old) in changes]
     return cleaned, changes
+
+
+def clean_spike_revert(df: pd.DataFrame, *, ret_spike: float = 0.15) -> tuple[pd.DataFrame, list]:
+    """Remove spike-and-revert bad prints from vendor data.
+
+    Detects days where the close makes a large move that is substantially
+    reversed within the next trading day — the hallmark of a bad vendor print.
+
+    Rule: flag day t if:
+      - |log_ret[t]| >= ret_spike, AND
+      - log_ret[t] and log_ret[t+1] have opposite signs, AND
+      - |log_ret[t+1]| >= 0.5 * |log_ret[t]|  (at least half reversed next day)
+
+    The flagged day is repaired by linear time-interpolation of Close (same as
+    the flat-bar cleaner). O/H/L are set equal to the repaired Close.
+
+    Returns: (cleaned_df, changes) where changes is a list of
+      (timestamp, old_close, new_close).
+    """
+    if df is None or df.empty:
+        return df, []
+
+    out = df.copy()
+    out = _normalize_ohlc_columns(out)
+
+    if "Close" not in out.columns:
+        return out, []
+
+    close = pd.to_numeric(out["Close"], errors="coerce")
+    log_ret = np.log(close / close.shift(1))
+    log_ret_next1 = log_ret.shift(-1)
+    log_ret_next2 = log_ret.shift(-2)
+
+    # Reversal within 1 or 2 days (catches spikes with a "dead cat" day in between)
+    reverts_next1 = (log_ret * log_ret_next1 < 0) & (log_ret_next1.abs() >= 0.5 * log_ret.abs())
+    reverts_next2 = (log_ret * log_ret_next2 < 0) & (log_ret_next2.abs() >= 0.5 * log_ret.abs())
+
+    spike_mask = (log_ret.abs() >= ret_spike) & (reverts_next1 | reverts_next2)
+
+    spike_days = spike_mask[spike_mask.fillna(False)].index
+    # When the reversal is 2 days out the intermediate day is also a bad print — include it
+    idx = out.index
+    extra_days = []
+    for dt in spike_days:
+        pos = idx.get_loc(dt)
+        if pos + 2 < len(idx):
+            mid = idx[pos + 1]
+            revert = idx[pos + 2]
+            if revert in spike_days or (log_ret.get(revert, 0) * log_ret.get(dt, 0) < 0):
+                extra_days.append(mid)
+    all_spike_days = idx[spike_mask.reindex(idx).fillna(False)].union(pd.DatetimeIndex(extra_days))
+    if len(all_spike_days) == 0:
+        return out, []
+
+    cleaned = out.copy()
+    changes = []
+    s = close.copy()
+    for dt in all_spike_days:
+        old = s.loc[dt]
+        s.loc[dt] = pd.NA
+        changes.append((dt, old))
+
+    s = s.astype("float64").interpolate(method="time", limit_direction="both", limit=5).bfill().ffill()
+
+    cleaned.loc[all_spike_days, "Close"] = s.loc[all_spike_days].values
+    if "Open" in cleaned.columns:
+        cleaned.loc[all_spike_days, "Open"] = s.loc[all_spike_days].values
+    if "High" in cleaned.columns:
+        cleaned.loc[all_spike_days, "High"] = s.loc[all_spike_days].values
+    if "Low" in cleaned.columns:
+        cleaned.loc[all_spike_days, "Low"] = s.loc[all_spike_days].values
+
+    changes = [(dt, float(old), float(cleaned.loc[dt, "Close"])) for (dt, old) in changes]
+    return cleaned, changes
+
 
 # Step 1: any known suffix → canonical exchange name.
 # Extend this when books.py or a new source introduces a new suffix.
@@ -405,34 +481,45 @@ def fetch_csv(ticker: str,data_params: dict=None, force_refresh: bool = False) -
 
     path = cache_path(ticker)
 
-    # Only use cache if it exists and is fresh; never auto-refresh
+    # use cache if it exists and is fresh
     if path.exists() and is_fresh(path, max_age):
         logger.debug(f"{ticker} - using cached data (no refresh)")
         df_cached = pd.read_csv(path, header=0, parse_dates=[0], index_col=0).sort_index()
         check_start_date(df_cached, ticker, start)
         # spike check cached data
-        logger.info(f"{ticker} - checking cached data for flat-bar spikes")
         cleaned, changes = clean_ohlc_flatbar_spikes(df_cached, ret_spike=0.10)
-        if changes:
-            logger.info(f"{ticker} - cleaned version made{len(changes)} flat-bar spike(s) on download - not yet saved")
+        cleaned, changes2 = clean_spike_revert(cleaned, ret_spike=0.15)
+        all_changes = changes + changes2
+        logger.info(f"changes: {all_changes}")
+        if all_changes:
+            logger.info(f"{ticker} - cleaned {len(all_changes)} spike(s) in cached data - rewriting cache")
+            tmp = path.with_suffix(".tmp")
+            cleaned.to_csv(tmp, date_format="%Y-%m-%d")
+            os.replace(tmp, path)
+            return cleaned
         else:
-            logger.info(f"{ticker} - no flat-bar spikes detected in cached data")
+            logger.info(f"  {ticker} - no spikes detected in cached data")
         return df_cached
 
     # If cache does not exist, download and cache
     if path.exists() and not is_fresh(path, max_age):
+        logger.info('path exists , not fresh')
         logger.info(f"{ticker} - cache stale, downloading new data")
     elif not path.exists():
+        logger.info('path not exists')
+
         logger.info(f"{ticker} - cache missing, downloading new data")
     data_params_full = dict(data_params)
     data_params_full['start'] = start
     data_params_full['end'] = end
     df_raw = _download_csv_frame(build_url(datasource, ticker, data_params_full), ticker)
     cleaned, changes = clean_ohlc_flatbar_spikes(df_raw, ret_spike=0.10)
-    if changes:
-        logger.info(f"{ticker} - cleaned {len(changes)} flat-bar spike(s) on download")
+    cleaned, changes2 = clean_spike_revert(cleaned, ret_spike=0.15)
+    all_changes = changes + changes2
+    if all_changes:
+        logger.info(f"{ticker} - cleaned {len(all_changes)} spike(s) on download ({len(changes)} flat-bar, {len(changes2)} spike-revert)")
     else:
-        logger.info(f"{ticker} - no flat-bar spikes detected on download")
+        logger.info(f"{ticker} - no spikes detected on download")
     df_to_save = cleaned
 
     # Atomic write of merged frame.

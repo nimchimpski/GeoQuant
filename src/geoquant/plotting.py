@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+from geoquant.data_io import pick_close_column
 
 
 def plot_spike_inspection(
@@ -13,6 +14,8 @@ def plot_spike_inspection(
     top_n: int = 10,
     show: bool = True,
 ):
+    if isinstance(series, pd.DataFrame):
+        series = pick_close_column(series)
     s = series.dropna().copy()
     r = np.log(s / s.shift(1))
     spikes = r[r.abs() > max_logret].sort_values(key=lambda x: x.abs(), ascending=False).head(top_n)
