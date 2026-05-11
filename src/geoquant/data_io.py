@@ -9,6 +9,12 @@ import pandas as pd
 from datetime import datetime, timezone, timedelta
 from geoquant.configs.config import *
 
+# logging
+import logging
+logger = logging.getLogger(__name__)
+# logger.setLevel(logging.INFO)
+
+
 
 def cache_path( ticker: str) -> pathlib.Path:
     safe_ticker = ticker.replace("/", "_").replace(":", "_").replace(" ", "_")
@@ -17,10 +23,10 @@ def cache_path( ticker: str) -> pathlib.Path:
 
 def is_fresh(path: pathlib.Path, max_age: int) -> bool:
     if not path.exists():
-        print(f"Cache file {path} does not exist")
+        logger.info(f"Cache file {path} does not exist")
         return False
     age_hours = (time.time() - path.stat().st_mtime) / 3600
-    # print(f"Cache file {path} age: {age_hours:.2f} hours (max age {max_age} hours)")
+    # logger.info(f"Cache file {path} age: {age_hours:.2f} hours (max age {max_age} hours)")
     result = age_hours <= max_age
     return result
 
@@ -33,8 +39,8 @@ def check_start_date(df, ticker: str, start: str, ) -> None:
     earliest = df.index.min().date()
     gap = (earliest - pd.to_datetime(start).date()).days
     if gap > 3:
-        print('gap days:', gap)
-        print('required start:', start,'\ndata start:', earliest)
+        logger.info(f'{ticker} gap days: {gap}')
+        logger.info(f'{ticker} required start: {start}\n {ticker} data start: {earliest}')
 
 
 def _normalize_ohlc_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -256,8 +262,8 @@ def print_cache_status(ticker: str) -> dict:
     """Print a compact cache status banner and return parsed fields."""
     meta_path = cache_meta_path(ticker)
     if not meta_path.exists():
-        print("CACHE STATUS [MISSING]", ticker)
-        print("no cache sidecar metadata found for", ticker)
+        logger.info("CACHE STATUS [MISSING]", ticker)
+        logger.info("no cache sidecar metadata found for", ticker)
         return {
             "status": "MISSING",
             "mode": None,
@@ -278,11 +284,11 @@ def print_cache_status(ticker: str) -> dict:
     else:
         status = "UNKNOWN"
 
-    print(f"CACHE STATUS [{status}] {ticker}")
-    print("cache meta path:", meta_path)
-    print("last_update_mode:", mode)
-    print("last_update_utc:", last_update)
-    print("last_full_refresh_utc:", last_full)
+    logger.info(f"CACHE STATUS [{status}] {ticker}")
+    logger.info("cache meta path:", meta_path)
+    logger.info("last_update_mode:", mode)
+    logger.info("last_update_utc:", last_update)
+    logger.info("last_full_refresh_utc:", last_full)
 
     return {
         "status": status,
@@ -339,16 +345,16 @@ def _download_csv_frame(url: str, ticker: str) -> pd.DataFrame:
     resp.raise_for_status()
     raw = resp.content
 
-    # Debug: print first 10 lines of raw CSV for inspection
-    print(f"\n--- RAW CSV for {ticker} from {url} ---")
+    # Debug: logger.info first 10 lines of raw CSV for inspection
+    logger.debug(f"\n--- RAW CSV for {ticker} from {url} ---")
     try:
         for i, line in enumerate(raw.decode(errors='replace').splitlines()):
-            print(line)
+            logger.debug(line)
             if i >= 9:
                 break
     except Exception as e:
-        print(f"[DEBUG] Could not decode raw response: {e}")
-    print("--- END RAW CSV ---\n")
+        logger.debug(f"[DEBUG] Could not decode raw response: {e}")
+    logger.debug("--- END RAW CSV ---\n")
 
     if looks_like_json(raw):
         try:
@@ -387,86 +393,46 @@ def fetch_csv(ticker: str,data_params: dict=None, force_refresh: bool = False) -
       - atomic write on success.
         Returns a parsed DataFrame (index on first column).
         """
-    print(f'+++fetch_csv : {ticker}, config/data_params:', data_params)
+    logger.debug(f'+++fetch_csv : {ticker}, config/data_params:', data_params)
 
-    start =data_params['start']
-    datasource =data_params['datasource']
-    max_age =data_params['max_age']
-    end =data_params.get('end', datetime.now(timezone.utc).strftime('%Y%m%d'))
+    start = data_params['start']
+    datasource = data_params['datasource']
+    max_age = data_params['max_age']
+    end = data_params.get('end', datetime.now(timezone.utc).strftime('%Y%m%d'))
 
     # Resolve once — used for both cache filename and download URL
     ticker = resolve_ticker(ticker, datasource)
 
     path = cache_path(ticker)
-    meta = _read_cache_meta(ticker)
-    monthly_full_due = _is_monthly_full_refresh_due(meta, interval_days=30)
-    need_full_refresh = force_refresh or (not path.exists()) or monthly_full_due
 
-    if force_refresh and path.exists():
-        print(f"{ticker} - force_refresh=True, bypassing cache")
-
-    # Fast path: fresh cache and no mandatory full refresh.
-    if (not need_full_refresh) and is_fresh(path, max_age):
-        print(f"{ticker} - using cached data")
+    # Only use cache if it exists and is fresh; never auto-refresh
+    if path.exists() and is_fresh(path, max_age):
+        logger.debug(f"{ticker} - using cached data (no refresh)")
         df_cached = pd.read_csv(path, header=0, parse_dates=[0], index_col=0).sort_index()
         check_start_date(df_cached, ticker, start)
+        # spike check cached data
+        logger.info(f"{ticker} - checking cached data for flat-bar spikes")
+        cleaned, changes = clean_ohlc_flatbar_spikes(df_cached, ret_spike=0.10)
+        if changes:
+            logger.info(f"{ticker} - cleaned version made{len(changes)} flat-bar spike(s) on download - not yet saved")
+        else:
+            logger.info(f"{ticker} - no flat-bar spikes detected in cached data")
         return df_cached
 
-    # Decide between full refresh and incremental merge.
-    if need_full_refresh:
-        data_params_full = dict(data_params)
-        data_params_full['start'] = start
-        data_params_full['end'] = end
-        print(f"{ticker} - monthly/forced full refresh")
-        df_raw = _download_csv_frame(build_url(datasource, ticker,data_params_full), ticker)
-        mode = 'full'
-    else:
-        # Incremental update: fetch from day after cached max date to current end.
-        df_cached = pd.read_csv(path, header=0, parse_dates=[0], index_col=0).sort_index()
-        if df_cached.empty:
-            data_params_full = dict(data_params)
-            data_params_full['start'] = start
-            data_params_full['end'] = end
-            print(f"{ticker} - cache empty, fallback full refresh")
-            df_raw = _download_csv_frame(build_url(datasource, ticker, data_params_full), ticker)
-            mode = 'full'
-        else:
-            last_cached = pd.to_datetime(df_cached.index.max())
-            inc_start_dt = (last_cached + pd.Timedelta(days=1)).date()
-            inc_end_dt = pd.to_datetime(end).date()
-
-            if inc_start_dt > inc_end_dt:
-                print(f"{ticker} - no new dates to fetch; serving cache")
-                check_start_date(df_cached, ticker, start)
-                return df_cached
-
-            data_params_inc = dict(data_params)
-            data_params_inc['start'] = str(inc_start_dt)
-            data_params_inc['end'] = str(inc_end_dt)
-            print(f"{ticker} - incremental update {data_params_inc['start']} -> {data_params_inc['end']}")
-            try:
-                df_inc = _download_csv_frame(build_url(datasource, ticker, data_params_inc), ticker)
-            except ValueError as exc:
-                # Some providers return empty payloads for same-day requests before EOD print.
-                if 'empty/tiny payload' in str(exc):
-                    print(f"{ticker} - incremental fetch returned no rows; serving cache")
-                    now_iso = _utc_now_iso()
-                    meta['last_update_utc'] = now_iso
-                    meta['last_update_mode'] = 'incremental_noop'
-                    _write_cache_meta(ticker, meta)
-                    check_start_date(df_cached, ticker, start)
-                    return df_cached
-                raise
-
-            df_raw = pd.concat([df_cached, df_inc], axis=0)
-            df_raw = df_raw[~df_raw.index.duplicated(keep='last')].sort_index()
-            mode = 'incremental'
-
-    check_start_date(df_raw, ticker, start)
-
+    # If cache does not exist, download and cache
+    if path.exists() and not is_fresh(path, max_age):
+        logger.info(f"{ticker} - cache stale, downloading new data")
+    elif not path.exists():
+        logger.info(f"{ticker} - cache missing, downloading new data")
+    data_params_full = dict(data_params)
+    data_params_full['start'] = start
+    data_params_full['end'] = end
+    df_raw = _download_csv_frame(build_url(datasource, ticker, data_params_full), ticker)
     cleaned, changes = clean_ohlc_flatbar_spikes(df_raw, ret_spike=0.10)
     if changes:
-        print(f"{ticker} - cleaned {len(changes)} flat-bar spike(s) on {mode} update")
+        logger.info(f"{ticker} - cleaned {len(changes)} flat-bar spike(s) on download")
+    else:
+        logger.info(f"{ticker} - no flat-bar spikes detected on download")
     df_to_save = cleaned
 
     # Atomic write of merged frame.
@@ -474,12 +440,13 @@ def fetch_csv(ticker: str,data_params: dict=None, force_refresh: bool = False) -
     df_to_save.to_csv(tmp, date_format="%Y-%m-%d")
     os.replace(tmp, path)
 
-    # Persist refresh metadata for monthly full-refresh policy.
+    # Persist refresh metadata
     now_iso = _utc_now_iso()
-    meta['last_update_utc'] = now_iso
-    meta['last_update_mode'] = mode
-    if mode == 'full':
-        meta['last_full_refresh_utc'] = now_iso
+    meta = {
+        'last_update_utc': now_iso,
+        'last_update_mode': 'download',
+        'last_full_refresh_utc': now_iso,
+    }
     _write_cache_meta(ticker, meta)
 
     return df_to_save
@@ -502,10 +469,10 @@ def sort_cols(df, ohlc=None):
     """Normalize time index and return a float close-like Series.
     """
     # if ohlc is None:
-    #     print('sort_cols: ohlc not set. ')
-        # print('sort_cols: ohlc not set. True only needed for ATR calculations for vol stops. Defaulting to False')
+    #     logger.info('sort_cols: ohlc not set. ')
+        # logger.info('sort_cols: ohlc not set. True only needed for ATR calculations for vol stops. Defaulting to False')
     if not df.index.is_monotonic_increasing: 
-        print('sort_cols: index wasnt sorted')
+        logger.info('sort_cols: index wasnt sorted')
         df = df.sort_index()
     
     df = df[~df.index.duplicated(keep='last')]
@@ -578,7 +545,7 @@ def compute_nav(books: list, data_params: dict) -> dict:
 
     for book in books:
         for entry in book:
-            print('entry:', entry)
+            logger.info('entry:', entry)
             name = entry.get('name', 'UNKNOWN')
             ccy = entry.get('ccy', 'CHF')
 

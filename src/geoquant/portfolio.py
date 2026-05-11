@@ -92,51 +92,62 @@ def create_asset_close_chf_s(asset_close_local_s: pd.Series, holding: dict, fx_m
 
 
 def get_holding_value_chf(h: dict, fx_map: dict, assets_close_local_df: pd.DataFrame, assets_close_chf_df: pd.DataFrame, asof: str) -> float:
-        name = h['name']
-
-        typ = h.get('type', '').lower()
-        ccy = h.get('ccy', '').upper()
-        position = float(h.get('position', 0.0))
-        # CASH ASSETS
-        if 'CASH' in name:
-            if ccy == 'CHF':
-                return float(h['amount'])
-            else:
-                pair = f"{ccy}CHF"
-                fx = fx_map.get(pair, pd.Series(dtype=float))
-                if fx.empty:
-                    raise KeyError(f"Missing FX series {pair} for cash {name}")
-                # ALIGN FX TO PORTFOLIO AS-OF DATE AND FFILL FX ONLY
-                # Use last available FX rate on or before asof (robust to index type)
-                try:
-                    last_fx = fx.loc[:asof].iloc[-1]
-                except IndexError:
-                    raise ValueError(f"FX {pair} has no value on/before {asof} for cash {name}")
-                if np.isnan(last_fx):
-                    raise ValueError(f"FX {pair} has no value on/before {asof} for cash {name}")
-                return float(h['amount']) * float(last_fx)
+    name = h['name']
+    typ = h.get('type', '').lower()
+    ccy = h.get('ccy', '').upper()
+    position = float(h.get('position', 0.0))
+    # CASH ASSETS
+    if 'CASH' in name:
+        if ccy == 'CHF':
+            return float(h['amount'])
         else:
-            # NON-CASH ASSETS: ALWAYS VALUE IN CHF AT THE COMMON AS-OF DATE
-            if ccy == 'CHF':
-                last_local = assets_close_local_df[name].reindex([asof]).iloc[-1]
-                return float(last_local) * position
-            elif h.get('include_fx_vol', '') != False:
-                # HEDGED IN RISK (KEPT IN LOCAL FOR RETURNS), BUT STILL VALUED IN CHF
-                last_local = assets_close_local_df[name].reindex([asof]).iloc[-1]
-                if name == 'EMIM':
-                    print('asset close chf', name, last_local)
-                pair = f"{ccy}CHF"
-                fx = fx_map.get(pair, pd.Series(dtype=float))
-                if fx.empty:
-                    raise KeyError(f"Missing FX series {pair} for asset {name}")
+            pair = f"{ccy}CHF"
+            fx = fx_map.get(pair, pd.Series(dtype=float))
+            if fx.empty:
+                raise KeyError(f"Missing FX series {pair} for cash {name}")
+            # Forward-fill and extend FX series to cover asof date
+            if asof not in fx.index:
+                if fx.index[-1] < asof:
+                    # Extend with last value
+                    fx = fx.append(pd.Series([fx.iloc[-1]], index=[asof]))
+            fx = fx.ffill()
+            try:
                 last_fx = fx.loc[:asof].iloc[-1]
-                if np.isnan(last_fx):
-                    raise ValueError(f"FX {pair} has no value on/before {asof} for asset {name}")
-                return float(last_local) * float(last_fx) * position
-            else:
-                # ALREADY CHF-CONVERTED SERIES (AND ALIGNED) – USE THE AS-OF PRICE
-                print('ignroe_fx for', name)
-                return float(assets_close_chf_df[name].reindex([asof]).iloc[-1]) * position
+            except IndexError:
+                raise ValueError(f"FX {pair} has no value on/before {asof} for cash {name}")
+            if np.isnan(last_fx):
+                raise ValueError(f"FX {pair} has no value on/before {asof} for cash {name}")
+            return float(h['amount']) * float(last_fx)
+    else:
+        # NON-CASH ASSETS: ALWAYS VALUE IN CHF AT THE COMMON AS-OF DATE
+        if ccy == 'CHF':
+            last_local = assets_close_local_df[name].reindex([asof]).iloc[-1]
+            return float(last_local) * position
+        elif h.get('include_fx_vol', '') != False:
+            # HEDGED IN RISK (KEPT IN LOCAL FOR RETURNS), BUT STILL VALUED IN CHF
+            last_local = assets_close_local_df[name].reindex([asof]).iloc[-1]
+            if name == 'EMIM':
+                print('asset close chf', name, last_local)
+            pair = f"{ccy}CHF"
+            fx = fx_map.get(pair, pd.Series(dtype=float))
+            if fx.empty:
+                raise KeyError(f"Missing FX series {pair} for asset {name}")
+            # Forward-fill and extend FX series to cover asof date
+            if asof not in fx.index:
+                if fx.index[-1] < asof:
+                    fx = fx.append(pd.Series([fx.iloc[-1]], index=[asof]))
+            fx = fx.ffill()
+            try:
+                last_fx = fx.loc[:asof].iloc[-1]
+            except IndexError:
+                raise ValueError(f"FX {pair} has no value on/before {asof} for asset {name}")
+            if np.isnan(last_fx):
+                raise ValueError(f"FX {pair} has no value on/before {asof} for asset {name}")
+            return float(last_local) * float(last_fx) * position
+        else:
+            # ALREADY CHF-CONVERTED SERIES (AND ALIGNED) – USE THE AS-OF PRICE
+            print('ignroe_fx for', name)
+            return float(assets_close_chf_df[name].reindex([asof]).iloc[-1]) * position
 
 
 def deal_with_gbx(close_local_s: pd.Series, ccy: str, gbx: bool) -> pd.Series:

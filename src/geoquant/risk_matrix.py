@@ -10,6 +10,8 @@ import re
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import seaborn as sns
+import logging
+
 
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
@@ -19,13 +21,14 @@ import geoquant.data_io as f1
 import geoquant.portfolio as portfolio
 import geoquant.books as books
 
-# print(holdings.IBKR_live)
+# logger.info(holdings.IBKR_live)
 
 importlib.reload(books)
 importlib.reload(f2)
 importlib.reload(config)
 
-
+logger = logging.getLogger(__name__)
+# logging.getLogger().setLevel(logging.DEBUG)  # or INFO, ERROR, etc.
 
 def build_returns_weights(
     holdings: list[dict],
@@ -52,20 +55,20 @@ def build_returns_weights(
       prices_df: DataFrame of CHF closes, T x N
       weights: Series aligned to columns in rets_df
     """
-    print('++++++ build_returns_weights()')
+    logger.debug('++++++ build_returns_weights()')
 
     fx_map = portfolio.make_fx_map(holdings, data_params, no_fx, usd_shift)
 
     # ------------BUILD CHF CLOSE SERIES PER ASSET-------------------
     assets_close_local_df = pd.DataFrame()
     assets_close_chf_df = pd.DataFrame()
-    # print('===========building price series df===============')
+    logger.debug('===========building price series df===============')
     for h in holdings:
         name = h['name']
-        # print(f'--------holdings-loop-{name}--------')
+        logger.debug(f'--------holdings-loop-{name}--------')
 
   
-        # print(f'>>>>>>>>>>>>>> Processing {name} >>>>>>>>')
+        logger.debug(f'>>>>>>>>>>>>>> Processing {name} >>>>>>>>')
         ccy   = h["ccy"].upper()
 
         if h.get("type", "").lower() == "cash":
@@ -73,44 +76,45 @@ def build_returns_weights(
         else:
             ticker   = h.get("ticker")
             px_df = f1.fetch_csv(ticker, data_params=data_params)
-            # print(px_df.tail(1))
+            logger.debug(px_df.tail(1))
             asset_close_local_s = f1.sort_cols(px_df, ohlc)
 
-            # *********** DEBUG PLOTTING ***************
-            # sa = asset_close_local_s
-            # sx = f2.trim_series(sa, data_params)
-            # print('px local earliest date', sx.index[0].date())
-            # print('px local latest', sx.iloc[-1])
-            # print(sx.tail)
-            # # CHECK FOR LARGE GAPS IN DATA
-            # date_diffs = sx.index.to_series().diff().dt.days.dropna()
-            # max_gap = date_diffs.max()
-            # print(f'Max data gap (days) for {name}: {max_gap}')
-            # r = sx.pct_change()
-            # print('r, r*100 ', r.std(), (r*100).std()  )
 
-            # # PLOT
-            # fig, ax = plt.subplots(figsize=(10,4))
-            # ax.plot(sx.index, sx, label=f'{name} local close')
-            # # Formatter: month-day only
-            # ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
+            # Spike check after loading and trimming series
+            sa = asset_close_local_s
+            sx = f2.trim_series(sa, data_params)
+            f2.check_spikes(sx, max_logret=0.07, top_n=10, plot=False, name=name)
 
-            # ax.xaxis.set_major_locator(mdates.AutoDateLocator())
-            # plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
+            logger.debug('px local earliest date', sx.index[0].date())
+            logger.debug('px local latest', sx.iloc[-1])
+            logger.debug(sx.tail)
+            # CHECK FOR LARGE GAPS IN DATA
+            date_diffs = sx.index.to_series().diff().dt.days.dropna()
+            max_gap = date_diffs.max()
+            logger.debug(f'Max data gap (days) for {name}: {max_gap}')
+            r = sx.pct_change()
+            logger.debug('r, r*100 ', r.std(), (r*100).std()  )
 
-            # plt.tight_layout()
+            # PLOT
+            if logger.isEnabledFor(logging.DEBUG):
+                fig, ax = plt.subplots(figsize=(10,4))
+                ax.plot(sx.index, sx, label=f'{name} local close')
+                # Formatter: month-day only
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
+                ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+                plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
+                plt.tight_layout()
+                plt.title(f'{name} local close price series')
+                plt.xlabel('Date')
+                plt.ylabel('Price')
+                plt.legend()
+                plt.grid()
+                plt.show()
 
-            # plt.title(f'{name} local close price series')
-            # plt.xlabel('Date')
-            # plt.ylabel('Price')
-            # plt.legend()
-            # plt.grid()
-            # plt.show()
 
 
 
-
-        # print('asset close local s', asset_close_local_s.iloc[-1])    
+        logger.debug('asset close local s', asset_close_local_s.iloc[-1])    
         ccy = h.get('ccy','').upper()
         # DEAL WITH GBX
         gbx = bool(h.get('gbx', False))
@@ -121,15 +125,15 @@ def build_returns_weights(
 
         # DECIDE IF TO REMOVE FX VOL IN RETURNS
         include_fx_vol_bool = h.get('include_fx_vol', True)
-        # if include_fx_vol_bool == False:
-            # print(f"Removing FX vol for {name} ({ccy}), is this hedged?")
+        if include_fx_vol_bool == False:
+            logger.debug(f"Removing FX vol for {name} ({ccy}), is this hedged?")
         if ccy == 'CHF' or no_fx or (not include_fx_vol_bool) or h.get('type','').lower()=='cash':
-            # print(f'No FX conversion for {name} ({ccy})')
+            # logger.debug(f'No FX conversion for {name} ({ccy})')
             asset_close_chf_s = asset_close_local_s.rename(name)
-            # print('>chf equiv latest', asset_close_chf_s.iloc[-1])
+            logger.debug('>chf equiv latest', asset_close_chf_s.iloc[-1])
         else:
             # OTHERWISE INCLUDE FX VOL
-            # print(f'Converting {name} from {ccy} to CHF')
+            logger.debug(f'Converting {name} from {ccy} to CHF')
             fx = fx_map.get(f"{ccy}CHF", pd.Series(dtype=float))
 
             fx_aligned = fx.reindex(asset_close_local_s.index).ffill()
@@ -138,9 +142,9 @@ def build_returns_weights(
                 fx_aligned.iloc[-1] = fx_aligned.dropna().iloc[-1]
             asset_close_chf_s = (asset_close_local_s * fx_aligned).rename(name)
 
-            # print(f'CHF close last for {name}: {asset_close_chf_s.iloc[-1]}')
+            logger.debug(f'CHF close last for {name}: {asset_close_chf_s.iloc[-1]}')
         assets_close_chf_df[name] = asset_close_chf_s
-    # print('===========df built===============\n')
+    logger.debug('===========df built===============\n')
     # ---------HEDGED CASH---------
     hedged_cash = [
         h['name'] for h in holdings
@@ -159,7 +163,7 @@ def build_returns_weights(
     window = data_params['end'] -  data_params['start']
     # convert window to int
     if prices_df.shape[0] < (window.days * 0.73):
-        print(
+        logger.info(
             f"After alignment only {prices_df.shape[0]} rows remain "
             f"(expected {window}). Data source may not have full history."
         )
@@ -179,14 +183,14 @@ def build_returns_weights(
 
         chf_value = portfolio.get_holding_value_chf(h, fx_map, assets_close_local_df, assets_close_chf_df, asof)
   
-        # print(f'CHF value {size} of {h["name"]}: {chf_value:.2f}')
+        logger.debug(f'CHF value {size} of {h["name"]}: {chf_value:.2f}')
         if chf_value is not None:
             chf_values[name] = chf_value
         
     total_val = sum(chf_values.values())
     
-    print(f'LOOKBACK DAYS/REGIME: {data_params["start"]} to {data_params["end"]}  ({(data_params["end"] - data_params["start"]).days} days)')
-    print(f"Total portfolio value (CHF): {total_val:.2f}")
+    logger.info(f'LOOKBACK DAYS/REGIME: {data_params["start"]} to {data_params["end"]}  ({(data_params["end"] - data_params["start"]).days} days)')
+    logger.debug(f"Total portfolio value (CHF): {total_val:.2f}")
 
 
     # CALCULATE WEIGHTS (user-specified or value-based)
@@ -203,7 +207,7 @@ def build_returns_weights(
             raise ValueError(f"Target weights must sum to 1. Got {weights.sum():.6f}")
         for name, weight in weights.items():
             value = float(chf_values.get(name, 0.0))
-            print(f"{name}: target weight {weight:.2%}, value CHF{value:.2f}")
+            logger.info(f"{name}: target weight {weight:.2%}, value CHF{value:.2f}")
     else:
         weights = pd.Series()
         for h in holdings:
@@ -213,7 +217,7 @@ def build_returns_weights(
             weight = value / total_val
             weights[name] = weight
             last = assets_close_local_df[name].iloc[-2]
-            print(f"{name}: value CHF{value:.2f},  last {last:.2f} *fx* {size}")
+            logger.debug(f"{name}: value CHF{value:.2f},  last {last:.2f} *fx* {size}")
         if not np.isclose(weights.sum(), 1.0, atol=1e-6):
             raise ValueError(f"Weights must sum to 1. Got {weights.sum():.6f}" "check postions input in holdings.")
     return rets_df, prices_df, weights
@@ -225,7 +229,7 @@ def portfolio_risk(rets_df: pd.DataFrame, weights: pd.Series) -> dict:
     Compute annualized vols, correlation, covariance, portfolio vol,
     marginal risk contribution (MRC), and percent risk contribution (PRC).
     """
-    print('++++++ portfolio_risk()')
+    logger.info('++++++ portfolio_risk()')
     # Annualized stats
     cov_daily = rets_df.cov()
     cov_annual = cov_daily * 252.0

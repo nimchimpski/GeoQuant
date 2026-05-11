@@ -1,3 +1,37 @@
+
+import logging
+import pandas as pd
+
+def check_spikes(series: pd.Series, max_logret: float = 0.07, top_n: int = 10, plot: bool = False, name: str = None):
+    """
+    Check for spikes in a price series by log return threshold.
+    Prints the top N absolute log returns and optionally plots them.
+    Logs at INFO level that the check was performed and whether it passed or failed.
+    """
+    logger = logging.getLogger(__name__)
+    label = name or getattr(series, 'name', 'series')
+    rets = np.log(series / series.shift(1))
+    spikes = rets.abs().sort_values(ascending=False).head(top_n)
+    logger.info(f"Spike check: {label} (top {top_n}, threshold {max_logret})")
+    flagged = spikes[spikes.abs() > max_logret]
+    if not flagged.empty:
+        logger.info(f"Spike check FAILED for {label}: {len(flagged)} spikes exceed threshold {max_logret}")
+    else:
+        logger.info(f"Spike check PASSED for {label}: No spikes exceed threshold.")
+    print(f"Top {top_n} spikes for {label} (|log return| > {max_logret}):")
+    print(spikes)
+    if not flagged.empty:
+        print(f"WARNING: {len(flagged)} spikes exceed threshold {max_logret}")
+    else:
+        print("No spikes exceed threshold.")
+    if plot:
+        plt.figure(figsize=(12, 2))
+        plt.plot(rets.index, rets, label="Log returns")
+        plt.scatter(spikes.index, spikes, color="red", label="Top spikes")
+        plt.title(f"Log returns with top spikes: {label}")
+        plt.legend()
+        plt.show()
+    return spikes
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
