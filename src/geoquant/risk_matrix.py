@@ -20,6 +20,8 @@ import geoquant.series_utils as f2
 import geoquant.data_io as f1
 import geoquant.portfolio as portfolio
 import geoquant.books as books
+import geoquant.plotting as gplot
+
 
 # logger.info(holdings.IBKR_live)
 
@@ -39,6 +41,8 @@ def build_returns_weights(
     usd_shift: bool = False,
     ohlc: bool = False,
     target_weights: dict = None,
+    plot_spikes: bool = False,
+
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
     """
     Build CHF daily returns matrix for the provided holdings.
@@ -96,20 +100,16 @@ def build_returns_weights(
             logger.debug('r, r*100 ', r.std(), (r*100).std()  )
 
             # PLOT
-            if logger.isEnabledFor(logging.DEBUG):
-                fig, ax = plt.subplots(figsize=(10,4))
-                ax.plot(sx.index, sx, label=f'{name} local close')
-                # Formatter: month-day only
-                ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
-                ax.xaxis.set_major_locator(mdates.AutoDateLocator())
-                plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
-                plt.tight_layout()
-                plt.title(f'{name} local close price series')
-                plt.xlabel('Date')
-                plt.ylabel('Price')
-                plt.legend()
-                plt.grid()
-                plt.show()
+            # PLOT
+            if plot_spikes or logger.isEnabledFor(logging.DEBUG):
+                gplot.plot_spike_inspection(
+                    sx,
+                    name=name,
+                    max_logret=0.07,
+                    top_n=10,
+                    show=True,
+                )
+
 
 
 
