@@ -61,6 +61,60 @@ def book_total_return(rets_df, weights):
     return total_return
 
 
+def _build_rebalance_table(
+    risk_holdings: list[dict],
+    weights: pd.Series,
+    total_val: float,
+    chf_values: dict,
+    assets_close_local_df: pd.DataFrame,
+    fx_map: dict,
+) -> pd.DataFrame:
+    """Build a rebalance table from target weights and current portfolio state."""
+    rebalance_rows = []
+    for h in risk_holdings:
+        name = h['name']
+        weight = float(weights.get(name, 0.0))
+        current_chf = float(chf_values.get(name, 0.0))
+        desired_chf = weight * total_val
+        delta_chf = desired_chf - current_chf
+        current_position = float(h.get('position', 0.0))
+
+        # assets_close_local_df is already GBX-adjusted upstream when needed
+        last_local_price = float(assets_close_local_df[name].dropna().iloc[-1])
+        ccy = h.get('ccy', '').upper()
+        if ccy in {'', 'CHF'}:
+            fx_rate = 1.0
+        else:
+            fx_s = fx_map.get(f"{ccy}CHF", pd.Series(dtype=float))
+            fx_rate = float(fx_s.dropna().iloc[-1]) if not fx_s.empty else 1.0
+
+        price_in_chf = last_local_price * fx_rate
+        desired_position = desired_chf / price_in_chf if price_in_chf > 0 else float('nan')
+        delta_shares = desired_position - current_position
+
+        logger.debug(
+            f"{name}: target weight {weight:.2%}, current CHF{current_chf:.0f}, "
+            f"desired CHF{desired_chf:.0f}, delta CHF{delta_chf:+.0f}, "
+            f"current pos {current_position:.0f}, desired pos {desired_position:.1f}, "
+            f"delta shares {delta_shares:+.1f}"
+        )
+
+        rebalance_rows.append({
+            'name': name,
+            'target_weight': weight,
+            'current_chf': current_chf,
+            'desired_chf': desired_chf,
+            'delta_chf': delta_chf,
+            'current_position': current_position,
+            'desired_position': desired_position,
+            'delta_shares': delta_shares,
+            'ccy': ccy,
+            'last_local_price': last_local_price,
+        })
+
+    return pd.DataFrame(rebalance_rows).set_index('name')
+
+
 
 
 
@@ -199,7 +253,7 @@ def build_returns_weights(
     window = data_params['end'] -  data_params['start']
     # convert window to int
     if prices_df.shape[0] < (window.days * 0.73):
-        logger.info(
+        logger.debug(
             f"After alignment only {prices_df.shape[0]} rows remain "
             f"(expected {window.days}). Data source may not have full history."
         )
@@ -230,13 +284,12 @@ def build_returns_weights(
         
     total_val = sum(chf_values.values())
     
-    logger.info(f'LOOKBACK DAYS/REGIME: {pd.to_datetime(data_params["start"]).date()} to {pd.to_datetime(data_params["end"]).date()}  ({(pd.to_datetime(data_params["end"]) - pd.to_datetime(data_params["start"])).days} days)')
     logger.debug(f"Total portfolio value (CHF): {total_val:.2f}")
 
 
     # CALCULATE WEIGHTS (book target weights or value-based)
     if use_target_weights:
-        logger.info("Using target weights from book for risk calculation.")
+        print("==============\nUSING TARGET WEIGHTS\n=================")
         target_weights = books.extract_target_weights(risk_holdings)
         # Use target weights from the book (should sum to 1.0)
         weights = pd.Series(dtype=float)
@@ -253,48 +306,14 @@ def build_returns_weights(
             weights = weights / wsum
         if not np.isclose(weights.sum(), 1.0, atol=1e-6):
             raise ValueError(f"Book target weights must sum to 1. Got {weights.sum():.6f}")
-        # calculate local value, so we can get target position size
-        
-        rebalance_rows = []
-        for h in risk_holdings:
-            name = h['name']
-            weight = float(weights.get(name, 0.0))
-            current_chf = float(chf_values.get(name, 0.0))
-            desired_chf = weight * total_val
-            delta_chf = desired_chf - current_chf
-            current_position = float(h.get('position', 0.0))
-            # last local price (GBX-adjusted already via assets_close_local_df)
-            last_local = assets_close_local_df[name].dropna().iloc[-1]
-            last_local_adj = last_local  # assets_close_local_df already GBX-adjusted
-            # FX rate local→CHF
-            ccy = h.get('ccy', '').upper()
-            if ccy == 'CHF' or ccy == '':
-                fx_rate = 1.0
-            else:
-                fx_s = fx_map.get(f"{ccy}CHF", pd.Series(dtype=float))
-                fx_rate = float(fx_s.dropna().iloc[-1]) if not fx_s.empty else 1.0
-            price_in_chf = last_local_adj * fx_rate
-            desired_position = desired_chf / price_in_chf if price_in_chf > 0 else float('nan')
-            delta_shares = desired_position - current_position
-            logger.info(
-                f"{name}: target weight {weight:.2%}, current CHF{current_chf:.0f},\n"
-                f"desired CHF{desired_chf:.0f}, delta CHF{delta_chf:+.0f},\n"
-                f"current pos {current_position:.0f}, desired pos {desired_position:.1f},\n"
-                f"delta shares {delta_shares:+.1f}"
-            )
-            rebalance_rows.append({
-                'name': name,
-                'target_weight': weight,
-                'current_chf': current_chf,
-                'desired_chf': desired_chf,
-                'delta_chf': delta_chf,
-                'current_position': current_position,
-                'desired_position': desired_position,
-                'delta_shares': delta_shares,
-                'ccy': ccy,
-                'last_local_price': last_local_adj,
-            })
-        rebalance_df = pd.DataFrame(rebalance_rows).set_index('name')
+        rebalance_df = _build_rebalance_table(
+            risk_holdings=risk_holdings,
+            weights=weights,
+            total_val=total_val,
+            chf_values=chf_values,
+            assets_close_local_df=assets_close_local_df,
+            fx_map=fx_map,
+        )
     else:
         weights = pd.Series()
         for h in risk_holdings:
@@ -317,7 +336,7 @@ def portfolio_risk(rets_df: pd.DataFrame, weights: pd.Series) -> dict:
     Compute annualized vols, correlation, covariance, portfolio vol,
     marginal risk contribution (MRC), and percent risk contribution (PRC).
     """
-    logger.info('++++++ portfolio_risk()')
+    logger.debug('++++++ portfolio_risk()')
     # Annualized stats
     cov_daily = rets_df.cov()
     cov_annual = cov_daily * 252.0
