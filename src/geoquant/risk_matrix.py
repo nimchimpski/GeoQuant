@@ -32,6 +32,38 @@ importlib.reload(config)
 logger = logging.getLogger(__name__)
 # logging.getLogger().setLevel(logging.DEBUG)  # or INFO, ERROR, etc.
 
+# --- Book total return calculation ---
+def book_total_returns(rets_df, weights):
+    """Return the compounded book return plus each position's percentage contribution.
+
+    The per-position return is the compounded return of that position's weighted log
+    return stream over the full period. The result is a tuple of:
+
+    - total book return as a float
+    - per-position returns as a pandas Series of percentage strings aligned to
+      ``rets_df.columns``
+    """
+    if rets_df.empty:
+        raise ValueError("rets_df is empty; cannot compute book return.")
+
+    w = weights.reindex(rets_df.columns).astype(float)
+    weighted_log_returns = rets_df.mul(w, axis=1)
+    position_returns = np.expm1(weighted_log_returns.sum(axis=0)).reindex(rets_df.columns)
+    position_returns = position_returns.map(lambda value: f"{value:.2%}")
+    total_return = float(np.expm1(weighted_log_returns.sum(axis=1).sum()))
+
+    return total_return, position_returns
+
+
+def book_total_return(rets_df, weights):
+    """Backward-compatible wrapper for the scalar book return."""
+    total_return, _ = book_total_returns(rets_df, weights)
+    return total_return
+
+
+
+
+
 def build_returns_weights(
     holdings: list[dict],
     data_params: dict = {},
@@ -180,16 +212,21 @@ def build_returns_weights(
 
     # GET CHF VALUE FOR EACH HOLDING (valuation always in CHF at as-of)
     chf_values = {}
+    local_values = {}
+
     asof = prices_df.index[-1]
     for h in risk_holdings:
         name = h['name']
         size = h.get('position', 0.0)
 
+        local_value = portfolio.get_holding_value_local(h, assets_close_local_df, asof)
+        local_values[name] = local_value
         chf_value = portfolio.get_holding_value_chf(h, fx_map, assets_close_local_df, assets_close_chf_df, asof)
   
         logger.debug(f'CHF value {size} of {h["name"]}: {chf_value:.2f}')
         if chf_value is not None:
             chf_values[name] = chf_value
+    
         
     total_val = sum(chf_values.values())
     
@@ -199,6 +236,7 @@ def build_returns_weights(
 
     # CALCULATE WEIGHTS (book target weights or value-based)
     if use_target_weights:
+        logger.info("Using target weights from book for risk calculation.")
         target_weights = books.extract_target_weights(risk_holdings)
         # Use target weights from the book (should sum to 1.0)
         weights = pd.Series(dtype=float)
@@ -215,9 +253,48 @@ def build_returns_weights(
             weights = weights / wsum
         if not np.isclose(weights.sum(), 1.0, atol=1e-6):
             raise ValueError(f"Book target weights must sum to 1. Got {weights.sum():.6f}")
-        for name, weight in weights.items():
-            value = float(chf_values.get(name, 0.0))
-            logger.info(f"{name}: target weight {weight:.2%}, value CHF{value:.2f}")
+        # calculate local value, so we can get target position size
+        
+        rebalance_rows = []
+        for h in risk_holdings:
+            name = h['name']
+            weight = float(weights.get(name, 0.0))
+            current_chf = float(chf_values.get(name, 0.0))
+            desired_chf = weight * total_val
+            delta_chf = desired_chf - current_chf
+            current_position = float(h.get('position', 0.0))
+            # last local price (GBX-adjusted already via assets_close_local_df)
+            last_local = assets_close_local_df[name].dropna().iloc[-1]
+            last_local_adj = last_local  # assets_close_local_df already GBX-adjusted
+            # FX rate local→CHF
+            ccy = h.get('ccy', '').upper()
+            if ccy == 'CHF' or ccy == '':
+                fx_rate = 1.0
+            else:
+                fx_s = fx_map.get(f"{ccy}CHF", pd.Series(dtype=float))
+                fx_rate = float(fx_s.dropna().iloc[-1]) if not fx_s.empty else 1.0
+            price_in_chf = last_local_adj * fx_rate
+            desired_position = desired_chf / price_in_chf if price_in_chf > 0 else float('nan')
+            delta_shares = desired_position - current_position
+            logger.info(
+                f"{name}: target weight {weight:.2%}, current CHF{current_chf:.0f},\n"
+                f"desired CHF{desired_chf:.0f}, delta CHF{delta_chf:+.0f},\n"
+                f"current pos {current_position:.0f}, desired pos {desired_position:.1f},\n"
+                f"delta shares {delta_shares:+.1f}"
+            )
+            rebalance_rows.append({
+                'name': name,
+                'target_weight': weight,
+                'current_chf': current_chf,
+                'desired_chf': desired_chf,
+                'delta_chf': delta_chf,
+                'current_position': current_position,
+                'desired_position': desired_position,
+                'delta_shares': delta_shares,
+                'ccy': ccy,
+                'last_local_price': last_local_adj,
+            })
+        rebalance_df = pd.DataFrame(rebalance_rows).set_index('name')
     else:
         weights = pd.Series()
         for h in risk_holdings:
@@ -228,9 +305,10 @@ def build_returns_weights(
             weights[name] = weight
             last = assets_close_local_df[name].iloc[-2]
             logger.debug(f"{name}: value CHF{value:.2f},  last {last:.2f} *fx* {size}")
+        rebalance_df = None
         if not np.isclose(weights.sum(), 1.0, atol=1e-6):
             raise ValueError(f"Weights must sum to 1. Got {weights.sum():.6f}" "check postions input in holdings.")
-    return rets_df, prices_df, weights
+    return rets_df, prices_df, weights, rebalance_df
 
 
 

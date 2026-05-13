@@ -126,8 +126,7 @@ def get_holding_value_chf(h: dict, fx_map: dict, assets_close_local_df: pd.DataF
         elif h.get('include_fx_vol', '') != False:
             # HEDGED IN RISK (KEPT IN LOCAL FOR RETURNS), BUT STILL VALUED IN CHF
             last_local = assets_close_local_df[name].reindex([asof]).iloc[-1]
-            if name == 'EMIM':
-                print('asset close chf', name, last_local)
+  
             pair = f"{ccy}CHF"
             fx = fx_map.get(pair, pd.Series(dtype=float))
             if fx.empty:
@@ -148,6 +147,23 @@ def get_holding_value_chf(h: dict, fx_map: dict, assets_close_local_df: pd.DataF
             # ALREADY CHF-CONVERTED SERIES (AND ALIGNED) – USE THE AS-OF PRICE
             print('ignroe_fx for', name)
             return float(assets_close_chf_df[name].reindex([asof]).iloc[-1]) * position
+
+def get_holding_value_local(h: dict, assets_close_local_df: pd.DataFrame, asof: str) -> float:
+    name = h['name']
+    typ = h.get('type', '').lower()
+    ccy = h.get('ccy', '').upper()
+    position = float(h.get('position', 0.0))
+    # CASH ASSETS
+    if 'CASH' in name:
+        return h['amount']
+    else:
+        # NON-CASH ASSETS
+        last_local = assets_close_local_df[name].reindex([asof]).iloc[-1]
+        return float(last_local) * position
+  
+
+
+
 
 
 def deal_with_gbx(close_local_s: pd.Series, ccy: str, gbx: bool) -> pd.Series:

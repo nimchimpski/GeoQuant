@@ -19,6 +19,8 @@ load_dotenv(dotenv_path=Path(__file__).parent / ".env")
 
 STOOQ_API = os.environ.get("STOOQ_API")
 logger.debug(f"STOOQ_API: {STOOQ_API}")
+EOD_API = os.environ.get("EOD_API")
+logger.debug(f"EOD_API: {EOD_API}")
 
 
 CONFIG_PATH = pathlib.Path(__file__).parent / "config.yaml"

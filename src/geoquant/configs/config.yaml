@@ -2,9 +2,10 @@
 # URLs are built inside data_io/url_builder function, using the data source param.
 
 
-START : '2024-09-01'  # global start date for all fetches
+START : '2025-05-01'  # global start date for all fetches
 END :  # global end date for all fetches, default to today if not set
 DEBUG : True
 
 DATASOURCE : 'stooq'
+# DATASOURCE : 'EOD'
 MAX_AGE : 24
