@@ -1,0 +1,63 @@
+mandate:
+  base_currency: CHF
+  style: medium_long_term
+  objective: compound_real_chf_wealth
+  notes:
+    - Strategic core reviewed monthly/quarterly.
+    - Tactical sleeve is event driven, not day trading.
+
+cadence:
+  tactical_scan: weekly
+  strategic_review: monthly
+  full_parameter_review: quarterly
+  rebalance_day_of_month: 1
+
+risk_budget:
+  portfolio_max_drawdown: 0.12  # monitoring/review threshold only — NOT an operational trigger; cores have no stops
+  monthly_vol_target: 0.04
+  max_single_position_weight: 0.15
+  tactical_weight_budget: 0.20
+
+stops:
+  cores: none
+  cores_rationale: Cores are long-term holdings. Rebalancing is the drawdown tool, not stops.
+  tacticals: atr_based
+  tacticals_rationale: ATR-based stop (hard_stop_multiple_atr x ATR from entry) is self-calibrating to each name's volatility. For typical tactical names this resolves to ~5-8% from entry, consistent with practitioner consensus for catalyst/event-driven trades.
+
+rules:
+  trim:
+    tactical_spike_3d:
+      enabled: true
+      threshold_return_3d: 0.20
+      trim_fraction: 0.75
+    tactical_spike_5d:
+      enabled: true
+      threshold_return_5d: 0.25
+      trim_fraction: 0.75
+  exit:
+    hard_stop_multiple_atr: 2.5
+    regime_break_exit:
+      enabled: true
+      max_correlation_to_book: 0.75
+      min_relative_strength_z: -1.0
+  add:
+    add_on_pullback:
+      enabled: true
+      pullback_from_peak: -0.08
+      max_add_fraction_of_target: 0.25
+
+backtest:
+  baseline: buy_and_hold_core_plus_current_tactical
+  compare_against_rules: true
+  costs:
+    fee_bps_per_trade: 5.0
+    slippage_bps_per_trade: 3.0
+  required_metrics:
+    - cagr
+    - max_drawdown
+    - sharpe
+    - calmar
+    - turnover
+    - hit_rate
+    - avg_win
+    - avg_loss

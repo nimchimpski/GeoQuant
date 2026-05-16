@@ -2,10 +2,19 @@
 # URLs are built inside data_io/url_builder function, using the data source param.
 
 
-START : '2025-05-01'  # global start date for all fetches
+START : '2025-05-01'  # analysis window start — returned data is filtered to this date
+CACHE_HORIZON : '2000-01-01'  # earliest date to fetch when building cache for a new ticker
 END :  # global end date for all fetches, default to today if not set
 DEBUG : True
 
+# DATASOURCE : 'ibkr'
 DATASOURCE : 'stooq'
-# DATASOURCE : 'EOD'
+# DATASOURCE : 'eodhd'
 MAX_AGE : 24
+
+# IBKR / ib_insync connection (only used when DATASOURCE = 'ibkr')
+# IBKR Desktop live=7496, IBKR Desktop paper=7497
+# IB Gateway live=4001,   IB Gateway paper=4002
+IBKR_HOST      : '127.0.0.1'
+IBKR_PORT      : 7496
+IBKR_CLIENT_ID : 10

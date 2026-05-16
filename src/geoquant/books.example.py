@@ -27,3 +27,32 @@ IBKR_live = [
 # Optional: adjusted / simulation books
 IBKR_live_adj = []
 IBKR_sim = []
+
+# ── BACKTEST TRADE LOG ────────────────────────────────────────────────────────
+# One entry per completed trade. Mirrors the single-trade fields in
+# tactical_backtest.ipynb so the book runner can iterate without modification.
+#
+# Required: ticker, entry_date, exit_date, entry_shares
+# Optional: name, ccy, gbx, entry_price (None = first close), trim_fraction,
+#           entry_spike_trim_pct  (defaults from policy if omitted)
+backtest_trades = [
+    {
+        "name":                 "XMWX Oct24",
+        "ticker":               "XMWX.LSE",
+        "ccy":                  "GBP",
+        "gbx":                  False,
+        "entry_date":           "01/10/2024",   # DD/MM/YYYY
+        "exit_date":            "30/04/2026",   # DD/MM/YYYY
+        "entry_shares":         40,
+        "entry_price":          None,           # None = use first close from data
+        "trim_fraction":        0.5,
+        "entry_spike_trim_pct": 0.08,
+    },
+    # Add more completed trades here, e.g.:
+    # {
+    #     "name": "BATG Nov24", "ticker": "BATG.LSE", "ccy": "GBP", "gbx": False,
+    #     "entry_date": "01/11/2024", "exit_date": "30/04/2026",
+    #     "entry_shares": 100, "entry_price": None,
+    #     "trim_fraction": 0.5, "entry_spike_trim_pct": 0.08,
+    # },
+]

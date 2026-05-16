@@ -287,7 +287,17 @@ _SUFFIX_TO_EXCHANGE: dict[str, str] = {
     '.FOREX': 'FOREX',  # FX pairs
 }
 
-# Step 2: exchange + datasource → ticker suffix to use for download/cache.
+# Step 2: exchange → canonical cache suffix (provider-independent).
+# Cache files are always named with this suffix so switching datasources never
+# creates separate files or loses history.
+_CANONICAL_SUFFIX: dict[str, str] = {
+    'LSE':   '.LSE',
+    'SIX':   '.SW',
+    'US':    '.US',
+    'FOREX': '.FOREX',
+}
+
+# Step 3: exchange + datasource → ticker suffix to use for the download URL only.
 # Empty string means no suffix (e.g. stooq FX: GBPCHF).
 _EXCHANGE_TO_SUFFIX: dict[str, dict[str, str]] = {
     'stooq': {
@@ -302,13 +312,45 @@ _EXCHANGE_TO_SUFFIX: dict[str, dict[str, str]] = {
         'US':    '.US',
         'FOREX': '.FOREX',
     },
+    'ibkr': {
+        'LSE':   '',   # base symbol only — IBKR uses Contract objects, not URL suffixes
+        'SIX':   '',
+        'US':    '',
+        'FOREX': '',
+    },
 }
 
-def resolve_ticker(ticker: str, datasource: str) -> str:
-    """Resolve any-suffix ticker to the datasource-specific form.
+# IBKR contract parameters per exchange key (used by _fetch_ibkr_bars)
+_IBKR_CONTRACT: dict[str, dict] = {
+    'LSE':   {'secType': 'STK',  'exchange': 'LSE',      'currency': 'GBP'},
+    'SIX':   {'secType': 'STK',  'exchange': 'EBS',      'currency': 'CHF'},
+    'US':    {'secType': 'STK',  'exchange': 'SMART',    'currency': 'USD'},
+    'FOREX': {'secType': 'CASH', 'exchange': 'IDEALPRO', 'currency': None},
+}
 
-    The resolved ticker is used for both the download URL and the cache filename,
-    so cache files are always named as they were downloaded.
+def canonical_ticker(ticker: str) -> str:
+    """Return the provider-independent cache key for a ticker.
+
+    Uses _CANONICAL_SUFFIX (exchange-based) so that switching datasources
+    (e.g. stooq → EODHD) always reads/writes the same on-disk file.
+
+    Examples:
+        'XMWX.UK'     → 'XMWX.LSE'   (stooq LSE → canonical LSE)
+        'XMWX.LSE'    → 'XMWX.LSE'   (EODHD LSE → canonical LSE, unchanged)
+        'GBPCHF'      → 'GBPCHF'      (bare ticker with no known suffix — pass through)
+        'GBPCHF.FOREX'→ 'GBPCHF.FOREX'(already canonical)
+    """
+    upper = ticker.upper()
+    for suffix, exchange in _SUFFIX_TO_EXCHANGE.items():
+        if upper.endswith(suffix):
+            base = ticker[: -len(suffix)]
+            return base + _CANONICAL_SUFFIX.get(exchange, suffix)
+    return ticker  # no known suffix — pass through unchanged
+
+def resolve_ticker(ticker: str, datasource: str) -> str:
+    """Resolve any-suffix ticker to the datasource-specific form for URL building.
+
+    Only used for constructing the download URL — NOT for cache filenames.
     Unknown suffixes are passed through unchanged.
     """
     upper = ticker.upper()
@@ -334,9 +376,93 @@ def build_url(datasource: str, ticker: str,data_params: dict) -> str:
             url += f"&apikey={STOOQ_API}"
     elif datasource == 'eodhd':
         url = f'https://eodhd.com/api/eod/{ticker}?api_token={data_params["api_token"]}&from={start}&to={end}'
+    elif datasource == 'ibkr':
+        raise ValueError("IBKR does not use HTTP URLs — call _fetch_ibkr_bars() instead of build_url().")
     else:
         raise ValueError(f"Unsupported datasource: {datasource}")
     return url
+
+
+def _fetch_ibkr_bars(dl_ticker: str, cache_ticker: str, data_params: dict) -> pd.DataFrame:
+    """Download OHLCV daily bars from Interactive Brokers via ib_insync.
+
+    Requires TWS or IB Gateway to be running locally with API connections enabled.
+    Configure host/port/clientId in config.yaml (IBKR_HOST, IBKR_PORT, IBKR_CLIENT_ID).
+
+    Note: In a Jupyter notebook environment, run the following before the first call
+    to avoid event-loop conflicts:
+        import nest_asyncio; nest_asyncio.apply()
+    """
+    try:
+        import ib_insync
+        from ib_insync import IB, Stock, Forex
+    except ImportError:
+        raise ImportError("ib_insync is not installed. Run: pip install ib_insync")
+
+    from geoquant.configs.config import IBKR_HOST, IBKR_PORT, IBKR_CLIENT_ID
+
+    # Derive exchange key from canonical ticker suffix (e.g. 'XMWX.LSE' → 'LSE')
+    _inv_canonical = {v.upper(): k for k, v in _CANONICAL_SUFFIX.items()}
+    exchange_key = None
+    upper = cache_ticker.upper()
+    for suffix, exch in _inv_canonical.items():
+        if upper.endswith(suffix):
+            exchange_key = exch
+            break
+    if exchange_key is None:
+        raise ValueError(f"Cannot determine exchange from canonical ticker: {cache_ticker}")
+
+    contract_params = _IBKR_CONTRACT.get(exchange_key)
+    if contract_params is None:
+        raise ValueError(f"No IBKR contract mapping for exchange: {exchange_key}")
+
+    # Duration string: cover from data_params['start'] to end with a buffer
+    start_dt = pd.to_datetime(data_params['start'])
+    end_dt   = pd.to_datetime(data_params.get('end', datetime.now().strftime('%Y-%m-%d')))
+    days = (end_dt - start_dt).days + 30
+    years = max(1, (days // 365) + 1)
+    duration = f'{min(years, 20)} Y'
+    end_str = end_dt.strftime('%Y%m%d 23:59:59')
+
+    ib = IB()
+    try:
+        ib.connect(IBKR_HOST, IBKR_PORT, clientId=IBKR_CLIENT_ID, readonly=True, timeout=15)
+
+        if exchange_key == 'FOREX':
+            contract = Forex(dl_ticker)   # e.g. Forex('GBPCHF') → symbol=GBP, currency=CHF
+        else:
+            contract = Stock(dl_ticker, contract_params['exchange'], contract_params['currency'])
+
+        bars = ib.reqHistoricalData(
+            contract,
+            endDateTime=end_str,
+            durationStr=duration,
+            barSizeSetting='1 day',
+            whatToShow='TRADES',
+            useRTH=True,
+            formatDate=1,
+            keepUpToDate=False,
+        )
+
+        if not bars:
+            raise ValueError(f"IBKR returned no data for {dl_ticker} on {exchange_key}")
+
+        df = ib_insync.util.df(bars)[['date', 'open', 'high', 'low', 'close', 'volume']]
+        df = df.rename(columns={
+            'date': 'Date', 'open': 'Open', 'high': 'High',
+            'low': 'Low', 'close': 'Close', 'volume': 'Volume',
+        })
+        df['Date'] = pd.to_datetime(df['Date'])
+        df = df.set_index('Date').sort_index()
+        logger.info(
+            f"{cache_ticker} - IBKR: {len(df)} bars "
+            f"{df.index[0].date()} → {df.index[-1].date()}"
+        )
+        return df
+
+    finally:
+        if ib.isConnected():
+            ib.disconnect()
 
 
 def build_runtime_config(
@@ -511,67 +637,127 @@ def url_builder(datasource: str, ticker: str,data_params: dict) -> str:
     return build_url(datasource, ticker,data_params)
 
 def fetch_csv(ticker: str,data_params: dict=None, force_refresh: bool = False) -> pd.DataFrame:
+    """Robust CSV fetch with on-disk cache (TTL), JSON throttle/error detection,
+    and safe incremental-merge writes.
+
+    Cache policy (IMPORTANT — data is never silently lost):
+    - Fresh cache  → returned as-is (no network call).
+    - Stale cache  → incremental download from (last_cached_date - 5 days) onwards,
+                     then MERGED with existing rows. Historical rows are preserved.
+    - Missing cache → full download from data_params['cache_horizon'] (default 2000-01-01),
+                      capturing maximum available history regardless of analysis window.
+    - force_refresh → full download from cache_horizon, MERGED with existing.
+
+    The returned DataFrame is always filtered to data_params['start'] (the analysis
+    window). The cache file itself stores the full history.
+
+    The only way to *replace* the cache completely is to delete the file on disk
+    and then call with force_refresh=True. This is intentional.
     """
-        Robust CSV fetch with:
-      - on-disk cache (TTL),
-      - JSON throttle/error detection (does NOT overwrite cache),
-      - atomic write on success.
-        Returns a parsed DataFrame (index on first column).
-        """
     logger.debug(f'+++fetch_csv : {ticker}, config/data_params:', data_params)
 
-    start = data_params['start']
+    start          = data_params['start']           # analysis window — filter applied on return
+    cache_horizon  = data_params.get('cache_horizon', '2000-01-01')  # earliest fetch date for new tickers
     datasource = data_params['datasource']
     max_age = data_params['max_age']
     end = data_params.get('end', datetime.now(timezone.utc).strftime('%Y%m%d'))
 
-    # Resolve once — used for both cache filename and download URL
-    ticker = resolve_ticker(ticker, datasource)
+    # Two roles for the ticker:
+    #   cache_ticker — canonical (exchange-based) name used for the on-disk file.
+    #                  Never changes when you switch datasources.
+    #   dl_ticker    — datasource-specific name used only for building the URL.
+    cache_ticker = canonical_ticker(ticker)
+    dl_ticker    = resolve_ticker(ticker, datasource)
 
-    path = cache_path(ticker)
+    path = cache_path(cache_ticker)
 
-    # use cache if it exists and is fresh
-    if path.exists() and is_fresh(path, max_age):
-        logger.debug(f"{ticker} - using cached data (no refresh)")
+    # ── FRESH CACHE: return as-is ──────────────────────────────────────────────
+    if path.exists() and is_fresh(path, max_age) and not force_refresh:
+        logger.debug(f"{cache_ticker} - using cached data (no refresh)")
         df_cached = pd.read_csv(path, header=0, parse_dates=[0], index_col=0).sort_index()
-        check_start_date(df_cached, ticker, start)
+        check_start_date(df_cached, cache_ticker, start)
         cleaned, audit = clean_price_spikes(df_cached)
         if audit["total_changes"]:
-            _log_spike_audit(ticker, audit, source="cached data")
+            _log_spike_audit(cache_ticker, audit, source="cached data")
             _write_cached_csv(path, cleaned)
-            return cleaned
-        _log_spike_audit(ticker, audit, source="cached data")
-        return df_cached
+            return cleaned.loc[cleaned.index >= pd.to_datetime(start)]
+        _log_spike_audit(cache_ticker, audit, source="cached data")
+        return df_cached.loc[df_cached.index >= pd.to_datetime(start)]
 
-    # If cache does not exist, download and cache
-    if path.exists() and not is_fresh(path, max_age):
-        logger.info('path exists , not fresh')
-        logger.info(f"{ticker} - cache stale, downloading new data")
-    elif not path.exists():
-        logger.info('path not exists')
+    # ── STALE OR MISSING: download then MERGE (never replace) ─────────────────
+    # Load whatever history already exists on disk so we can merge after download.
+    df_existing = None
+    existing_meta = _read_cache_meta(cache_ticker)
+    if path.exists():
+        try:
+            df_existing = pd.read_csv(path, header=0, parse_dates=[0], index_col=0).sort_index()
+        except Exception as e:
+            logger.warning(f"{cache_ticker} - could not load existing cache for merge: {e}")
 
-        logger.info(f"{ticker} - cache missing, downloading new data")
     data_params_full = dict(data_params)
-    data_params_full['start'] = start
     data_params_full['end'] = end
-    df_raw = _download_csv_frame(build_url(datasource, ticker, data_params_full), ticker)
+
+    if df_existing is not None and len(df_existing) and not force_refresh:
+        # Incremental: only fetch rows after the last cached date (5-day overlap
+        # guards against weekend/holiday boundary issues).
+        incr_start = df_existing.index.max() - pd.Timedelta(days=5)
+        data_params_full['start'] = max(pd.to_datetime(start), incr_start)
+        update_mode = 'incremental'
+        logger.info(
+            f"{cache_ticker} - cache stale, incremental update from "
+            f"{pd.to_datetime(data_params_full['start']).date()} "
+            f"(existing history from {df_existing.index.min().date()}) "
+            f"[dl_ticker={dl_ticker}]"
+        )
+    else:
+        data_params_full['start'] = cache_horizon
+        update_mode = 'download' if df_existing is None else 'full_refresh'
+        logger.info(
+            f"{cache_ticker} - {'force_refresh' if force_refresh else 'cache missing'}, "
+            f"full download from {pd.to_datetime(cache_horizon).date()} (cache_horizon) "
+            f"[dl_ticker={dl_ticker}]"
+        )
+
+    if datasource == 'ibkr':
+        df_raw = _fetch_ibkr_bars(dl_ticker, cache_ticker, data_params_full)
+    else:
+        df_raw = _download_csv_frame(build_url(datasource, dl_ticker, data_params_full), dl_ticker)
     cleaned, audit = clean_price_spikes(df_raw)
-    _log_spike_audit(ticker, audit, source="download")
-    df_to_save = cleaned
+    _log_spike_audit(cache_ticker, audit, source="download")
+
+    # ── MERGE: existing history + new rows; new data wins on any overlap ───────
+    if df_existing is not None and len(df_existing):
+        df_to_save = (
+            pd.concat([df_existing, cleaned])
+            .sort_index()
+            .pipe(lambda d: d[~d.index.duplicated(keep='last')])
+        )
+        logger.info(
+            f"{cache_ticker} - merged {len(df_existing)} existing + {len(cleaned)} new "
+            f"= {len(df_to_save)} total rows "
+            f"({df_to_save.index.min().date()} → {df_to_save.index.max().date()})"
+        )
+    else:
+        df_to_save = cleaned
 
     # Atomic write of merged frame.
     _write_cached_csv(path, df_to_save)
 
-    # Persist refresh metadata
+    # Persist refresh metadata (preserve last_full_refresh_utc on incremental)
     now_iso = _utc_now_iso()
+    last_full = (
+        existing_meta.get('last_full_refresh_utc') or now_iso
+        if update_mode == 'incremental'
+        else now_iso
+    )
     meta = {
         'last_update_utc': now_iso,
-        'last_update_mode': 'download',
-        'last_full_refresh_utc': now_iso,
+        'last_update_mode': update_mode,
+        'last_full_refresh_utc': last_full,
     }
-    _write_cache_meta(ticker, meta)
+    _write_cache_meta(cache_ticker, meta)
 
-    return df_to_save
+    return df_to_save.loc[df_to_save.index >= pd.to_datetime(start)]
 
 def pick_close_column(df: pd.DataFrame) -> pd.Series:
     """Pick the most appropriate close-like column.
